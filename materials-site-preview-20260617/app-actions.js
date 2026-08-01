@@ -126,6 +126,85 @@ window.cancelAccountDraft = function () {
   render();
 };
 
+function accountGuardMessage(code) {
+  const messages = {
+    UNKNOWN_ROLE: "帳號角色無法辨識，已拒絕變更",
+    OWNER_BOOTSTRAP_REQUIRED: "首位老闆只能使用一次性建立流程設定",
+    OWNER_PROTECTED: "老闆帳號只能由老闆管理",
+    LAST_OWNER_PROTECTED: "最後一位啟用中的老闆不可停用、刪除或降權",
+    ACCOUNT_MANAGEMENT_DENIED: "目前帳號沒有管理帳號的權限",
+  };
+  return messages[code] || "帳號角色或狀態變更被拒絕";
+}
+
+window.openOwnerBootstrap = function () {
+  const accounts = loadAccounts();
+  if (currentUser()?.role !== "admin" || activeOwnerCount(accounts) > 0) {
+    const result = { ok: false, code: "OWNER_BOOTSTRAP_UNAVAILABLE", error: "首位老闆建立流程目前不可使用" };
+    setToast(result.error);
+    return result;
+  }
+  ui.ownerBootstrapOpen = true;
+  render();
+  return { ok: true, code: "", error: "" };
+};
+
+window.closeOwnerBootstrap = function () {
+  ui.ownerBootstrapOpen = false;
+  render();
+  return { ok: true, code: "", error: "" };
+};
+
+window.confirmOwnerBootstrap = function () {
+  const actor = currentUser();
+  const accounts = loadAccounts();
+  const targetId = String(document.getElementById("owner-bootstrap-account")?.value || "");
+  if (actor?.role !== "admin" || activeOwnerCount(accounts) > 0) {
+    const result = { ok: false, code: "OWNER_BOOTSTRAP_UNAVAILABLE", error: "首位老闆已建立，或目前帳號不是管理人員" };
+    setToast(result.error);
+    return result;
+  }
+  const target = accounts.find((account) => account.id === targetId && account.role !== "owner" && account.is_active !== false);
+  if (!target) {
+    const result = { ok: false, code: "OWNER_BOOTSTRAP_TARGET_REQUIRED", error: "請先選擇一個啟用中的既有帳號" };
+    setToast(result.error);
+    return result;
+  }
+  const promoted = normalizeAccountRecord({
+    ...target,
+    role: "owner",
+    permissions: defaultAccountPermissions("owner"),
+  });
+  const nextAccounts = accounts.map((account) => (account.id === target.id ? promoted : account));
+  const guard = validateAccountMutation({
+    actor,
+    previousAccounts: accounts,
+    nextAccounts,
+    targetId: target.id,
+    bootstrapConfirmed: true,
+  });
+  if (!guard.ok) {
+    const result = { ok: false, code: guard.code, error: accountGuardMessage(guard.code) };
+    setToast(result.error);
+    return result;
+  }
+  if (!saveAccounts(nextAccounts, {
+    actor,
+    previousAccounts: accounts,
+    targetId: target.id,
+    bootstrapConfirmed: true,
+  })) {
+    const result = { ok: false, code: "OWNER_BOOTSTRAP_SAVE_FAILED", error: "首位老闆建立失敗，帳號資料未變更" };
+    setToast(result.error);
+    return result;
+  }
+  logRecordChange("accounts", "update", promoted, `一次性建立首位老闆：${promoted.name}`);
+  if (actor.id === promoted.id) setAuthSession(promoted);
+  ui.ownerBootstrapOpen = false;
+  setToast("首位老闆已建立");
+  return { ok: true, code: "", error: "", account: promoted };
+};
+
 function accountPayloadFromForm(form) {
   const data = new FormData(form);
   return normalizeAccountRecord({
@@ -167,7 +246,7 @@ function validateAccountPayload(payload, accounts, currentId = null) {
   const nextAccounts = currentId
     ? accounts.map((account) => (account.id === currentId ? payload : account))
     : [...accounts, payload];
-  if (!nextAccounts.some((account) => account.role === "admin" && account.is_active)) {
+  if (!nextAccounts.some((account) => ["owner", "admin"].includes(account.role) && account.is_active)) {
     setToast("至少要保留一個啟用的管理人員");
     return false;
   }
@@ -182,18 +261,39 @@ window.createAccount = async function (event) {
   event.preventDefault();
   if (!requirePermission("manage_accounts")) return;
   const accounts = loadAccounts();
+  const actor = currentUser();
   const raw = accountPayloadFromForm(event.currentTarget);
   if (!MaterialsQuoteDomain.isNumericCredential(raw.password)) {
     setToast("密碼需為 3 至 20 位數字");
     return;
   }
   const payload = normalizeAccountRecord({ ...raw, password: "", password_hash: await hashNumericPin(raw.password) });
+  if (payload.role === "owner" && activeOwnerCount(accounts) === 0) {
+    const result = { ok: false, code: "OWNER_BOOTSTRAP_REQUIRED", error: "首位老闆必須從既有帳號執行一次性 bootstrap" };
+    setToast(result.error);
+    return result;
+  }
   if (!validateAccountPayload(payload, accounts)) return;
-  saveAccounts([...accounts, payload]);
+  const nextAccounts = [...accounts, payload];
+  const guard = validateAccountMutation({ actor, previousAccounts: accounts, nextAccounts, targetId: payload.id });
+  if (!guard.ok) {
+    const result = { ok: false, code: guard.code, error: accountGuardMessage(guard.code) };
+    setToast(result.error);
+    return result;
+  }
+  if (payload.role === "owner" && actor?.role === "owner" && !confirm(`確定要建立老闆帳號「${payload.name}」？`)) {
+    return { ok: false, code: "ACCOUNT_CHANGE_CANCELLED", error: "已取消帳號建立" };
+  }
+  if (!saveAccounts(nextAccounts, { actor, previousAccounts: accounts, targetId: payload.id })) {
+    const result = { ok: false, code: "ACCOUNT_SAVE_REJECTED", error: "帳號權限變更被拒絕" };
+    setToast(result.error);
+    return result;
+  }
   logRecordChange("accounts", "create", payload, `帳號：${payload.account}，角色：${accountRoleLabel(payload.role)}`);
   ui.accountDraft = null;
   setToast("帳號已建立");
   render();
+  return { ok: true, code: "", error: "", account: payload };
 };
 
 async function saveAccountFromForm(form, accountId, options = {}) {
@@ -201,7 +301,15 @@ async function saveAccountFromForm(form, accountId, options = {}) {
   const accounts = loadAccounts();
   const existing = accounts.find((account) => account.id === accountId);
   if (!existing) return;
+  const actor = currentUser();
+  if (existing.role === "owner" && actor?.role !== "owner") {
+    const result = { ok: false, code: "OWNER_PROTECTED", error: accountGuardMessage("OWNER_PROTECTED") };
+    setToast(result.error);
+    return result;
+  }
   const formPayload = accountPayloadFromForm(form);
+  if (form.elements?.role?.disabled) formPayload.role = existing.role;
+  if (form.elements?.is_active?.disabled) formPayload.is_active = existing.is_active;
   const resetPin = String(formPayload.password || "");
   if (resetPin && !MaterialsQuoteDomain.isNumericCredential(resetPin)) {
     setToast("新密碼需為 3 至 20 位數字");
@@ -218,7 +326,34 @@ async function saveAccountFromForm(form, accountId, options = {}) {
     password_hash: resetPin ? await hashNumericPin(resetPin) : existing.password_hash,
     permissions: roleChanged ? defaultAccountPermissions(formPayload.role) : normalizeAccountPermissions(existing.permissions, formPayload.role),
   });
+  if (payload.role === "owner" && existing.role !== "owner" && actor?.role !== "owner") {
+    const result = { ok: false, code: "OWNER_BOOTSTRAP_REQUIRED", error: accountGuardMessage("OWNER_BOOTSTRAP_REQUIRED") };
+    setToast(result.error);
+    return result;
+  }
   if (!validateAccountPayload(payload, accounts, accountId)) return;
+  const importantChange = roleChanged || existing.is_active !== payload.is_active || Boolean(resetPin);
+  if (actor?.role === "owner" && importantChange && options.confirmed !== true) {
+    const description = roleChanged
+      ? `將 ${existing.name} 的角色由「${accountRoleLabel(existing.role)}」改為「${accountRoleLabel(payload.role)}」`
+      : existing.is_active !== payload.is_active
+        ? `${payload.is_active ? "啟用" : "停用"}帳號 ${existing.name}`
+        : `重設 ${existing.name} 的密碼`;
+    if (!confirm(`確定要${description}？`)) return { ok: false, code: "ACCOUNT_CHANGE_CANCELLED", error: "已取消帳號變更" };
+  }
+  const bootstrapConfirmed = false;
+  const guard = validateAccountMutation({
+    actor,
+    previousAccounts: accounts,
+    nextAccounts: accounts.map((account) => (account.id === accountId ? payload : account)),
+    targetId: accountId,
+    bootstrapConfirmed,
+  });
+  if (!guard.ok) {
+    const result = { ok: false, code: guard.code, error: accountGuardMessage(guard.code) };
+    setToast(result.error);
+    return result;
+  }
   const changed = changedFieldLabels(existing, payload, [
     ["name", "名稱"],
     ["account", "帳號"],
@@ -226,12 +361,19 @@ async function saveAccountFromForm(form, accountId, options = {}) {
     ["is_active", "啟用狀態"],
   ]);
   if (resetPin) changed.push("密碼");
-  saveAccounts(accounts.map((account) => (account.id === accountId ? payload : account)));
+  if (!saveAccounts(accounts.map((account) => (account.id === accountId ? payload : account)), {
+    actor, previousAccounts: accounts, targetId: accountId, bootstrapConfirmed,
+  })) {
+    const result = { ok: false, code: "ACCOUNT_SAVE_REJECTED", error: "帳號資料未通過權限檢查，未進行變更" };
+    setToast(result.error);
+    return result;
+  }
   logRecordChange("accounts", "update", payload, changed.length ? `變更欄位：${changed.join("、")}` : "儲存帳號資料");
   const user = currentUser();
   if (user?.id === accountId) setAuthSession(payload);
   if (options.toast !== false) setToast("帳號已更新");
   else render();
+  return { ok: true, code: "", error: "", account: payload };
 }
 
 window.autoSaveAccount = function (form, accountId) {
@@ -247,8 +389,13 @@ window.openAccountPermissions = function (accountId) {
   if (!requirePermission("manage_accounts")) return;
   const account = accountById(accountId);
   if (!account) return;
+  if (account.role === "owner" && currentUser()?.role !== "owner") {
+    setToast(accountGuardMessage("OWNER_PROTECTED"));
+    return { ok: false, code: "OWNER_PROTECTED", error: accountGuardMessage("OWNER_PROTECTED") };
+  }
   ui.permissionAccountId = accountId;
   render();
+  return { ok: true, code: "", error: "" };
 };
 
 window.closeAccountPermissions = function () {
@@ -261,6 +408,10 @@ window.toggleAccountPermission = function (accountId, permissionKey) {
   const accounts = loadAccounts();
   const account = accounts.find((item) => item.id === accountId);
   if (!account) return;
+  if (account.role === "owner" && currentUser()?.role !== "owner") {
+    setToast("老闆權限只能由老闆調整");
+    return;
+  }
   const permissions = normalizeAccountPermissions(account.permissions, account.role);
   const next = {
     ...account,
@@ -269,6 +420,7 @@ window.toggleAccountPermission = function (accountId, permissionKey) {
       [permissionKey]: !permissions[permissionKey],
     },
   };
+  if (account.role === "contractor") next.permissions = defaultAccountPermissions("contractor");
   if (permissionKey === "manage_accounts") {
     const nextAccounts = accounts.map((item) => (item.id === accountId ? next : item));
     if (!activeAccountsWithPermission(nextAccounts, "manage_accounts").length) {
@@ -276,7 +428,11 @@ window.toggleAccountPermission = function (accountId, permissionKey) {
       return;
     }
   }
-  saveAccounts(accounts.map((item) => (item.id === accountId ? next : item)));
+  const nextAccounts = accounts.map((item) => (item.id === accountId ? next : item));
+  if (!saveAccounts(nextAccounts, { actor: currentUser(), previousAccounts: accounts, targetId: accountId })) {
+    setToast("帳號權限變更被拒絕");
+    return;
+  }
   logWorkEvent("permission", `調整帳號權限：${workLogRecordTitle("accounts", next)}`, {
     entityType: "accounts",
     entityId: next.id,
@@ -286,6 +442,45 @@ window.toggleAccountPermission = function (accountId, permissionKey) {
   const user = currentUser();
   if (user?.id === accountId) setAuthSession(next);
   render();
+};
+
+window.deleteAccount = function (accountId) {
+  if (!requirePermission("manage_accounts")) return { ok: false, code: "ACCOUNT_MANAGEMENT_DENIED", error: accountGuardMessage("ACCOUNT_MANAGEMENT_DENIED") };
+  const actor = currentUser();
+  const accounts = loadAccounts();
+  const target = accounts.find((account) => account.id === accountId);
+  if (!target) return { ok: false, code: "ACCOUNT_NOT_FOUND", error: "找不到帳號" };
+  if (target.role === "owner" && actor?.role !== "owner") {
+    const result = { ok: false, code: "OWNER_PROTECTED", error: accountGuardMessage("OWNER_PROTECTED") };
+    setToast(result.error);
+    return result;
+  }
+  if (target.role === "owner" && target.is_active && activeOwnerCount(accounts) === 1) {
+    const result = { ok: false, code: "LAST_OWNER_PROTECTED", error: accountGuardMessage("LAST_OWNER_PROTECTED") };
+    setToast(result.error);
+    return result;
+  }
+  if (!confirm(`確定刪除帳號「${target.name}」？`)) return { ok: false, code: "ACCOUNT_DELETE_CANCELLED", error: "已取消刪除" };
+  const nextAccounts = accounts.filter((account) => account.id !== accountId);
+  const guard = validateAccountMutation({ actor, previousAccounts: accounts, nextAccounts, targetId: accountId });
+  if (!guard.ok) {
+    const result = { ok: false, code: guard.code, error: accountGuardMessage(guard.code) };
+    setToast(result.error);
+    return result;
+  }
+  if (!saveAccounts(nextAccounts, { actor, previousAccounts: accounts, targetId: accountId })) {
+    const result = { ok: false, code: "ACCOUNT_DELETE_REJECTED", error: "帳號刪除被拒絕，資料未變更" };
+    setToast(result.error);
+    return result;
+  }
+  logRecordChange("accounts", "delete", target, `刪除帳號：${target.name}`);
+  if (actor?.id === target.id) {
+    clearAuthSession();
+    go("/login");
+  } else {
+    setToast("帳號已刪除");
+  }
+  return { ok: true, code: "", error: "" };
 };
 
 window.searchList = function (event, path) {
@@ -338,30 +533,53 @@ window.saveMaterial = function (event, materialId) {
   if (!requirePermission("edit_material_prices")) return;
   const existing = materialId ? materialById(materialId) : null;
   const data = Object.fromEntries(new FormData(event.currentTarget));
-  const payload = {
+  const payload = MaterialsQuoteDomain.migrateMaterialSpecifications({
+    ...(existing || {}),
     id: materialId || id("m"),
     name: data.name,
     code: data.code,
     category: data.category,
     unit: data.unit,
     pricing_type: data.pricing_type,
-    default_thickness: data.default_thickness,
-    default_width: data.default_width,
-    default_length: data.default_length,
-    default_weight: data.default_weight,
-    wall_thickness_mm: data.wall_thickness_mm,
+    default_thickness: Object.prototype.hasOwnProperty.call(data, "default_thickness") ? data.default_thickness : existing?.default_thickness ?? "",
+    default_width: Object.prototype.hasOwnProperty.call(data, "default_width") ? data.default_width : existing?.default_width ?? "",
+    default_length: Object.prototype.hasOwnProperty.call(data, "default_length") ? data.default_length : existing?.default_length ?? "",
+    default_weight: Object.prototype.hasOwnProperty.call(data, "default_weight") ? data.default_weight : existing?.default_weight ?? "",
+    wall_thickness_mm: Object.prototype.hasOwnProperty.call(data, "wall_thickness_mm") ? data.wall_thickness_mm : existing?.wall_thickness_mm ?? "",
     density_factor: data.density_factor || 0.02466,
     formula_version: data.formula_version || existing?.formula_version || "legacy-v1",
-    cost_price: data.cost_price === "" ? "" : n(data.cost_price),
+    formula_source: data.formula_source || existing?.formula_source || "網站既有公式",
+    dimension_unit: Object.prototype.hasOwnProperty.call(data, "dimension_unit")
+      ? (["mm", "cm", "m"].includes(data.dimension_unit) ? data.dimension_unit : "cm")
+      : existing?.dimension_unit ?? "cm",
+    standard_budget_unit_price: data.standard_budget_unit_price === "" ? "" : data.standard_budget_unit_price,
+    standard_budget_source: data.standard_budget_source || existing?.standard_budget_source || "",
+    standard_budget_version: data.standard_budget_version || existing?.standard_budget_version || "",
+    cost_price: data.cost_price === "" ? "" : data.cost_price,
+    cost_price_status: data.cost_price !== "" && data.cost_verified ? "verified" : "unverified",
     price_effective_date: data.price_effective_date || "",
-    unit_price: n(data.unit_price),
-    waste_pct: n(data.waste_pct),
-    labor_unit_price: n(data.labor_unit_price),
+    default_actual_unit_price: data.unit_price,
+    unit_price: data.unit_price,
+    actual_price_source: existing?.actual_price_source || "材料主檔",
+    actual_price_version: data.price_effective_date || existing?.actual_price_version || "",
+    waste_pct: data.waste_pct,
+    labor_unit_price: data.labor_unit_price,
     labor_waste_pct: data.labor_waste_pct,
     labor_pricing_type: data.labor_pricing_type,
     notes: data.notes,
     is_active: Boolean(data.is_active),
-  };
+  });
+  const materialValidation = MaterialsQuoteDomain.validateMaterialForPersistence(payload);
+  if (!materialValidation.ok) {
+    setToast(materialValidation.errors[0]);
+    return;
+  }
+  [
+    "default_thickness", "default_width", "default_length", "default_weight", "wall_thickness_mm", "density_factor",
+    "standard_budget_unit_price", "default_actual_unit_price", "unit_price", "cost_price", "waste_pct", "labor_unit_price", "labor_waste_pct",
+  ].forEach((field) => {
+    if (payload[field] !== "" && payload[field] != null) payload[field] = Number(payload[field]);
+  });
   if (existing?.catalog_group) {
     Object.assign(payload, {
       catalog_group: existing.catalog_group,
@@ -383,8 +601,9 @@ window.saveMaterial = function (event, materialId) {
     ["unit", "單位"],
     ["pricing_type", "計價方式"],
     ["formula_version", "公式版本"],
-    ["cost_price", "成本價"],
-    ["unit_price", "報價單價"],
+    ["standard_budget_unit_price", "標準／預算價"],
+    ["cost_price", "已確認成本價"],
+    ["unit_price", "案件單價預設值"],
     ["price_effective_date", "價格生效日"],
     ["labor_unit_price", "工資單價"],
     ["is_active", "啟用狀態"],
@@ -392,6 +611,65 @@ window.saveMaterial = function (event, materialId) {
   logRecordChange("materials", existing ? "update" : "create", payload, existing && changed.length ? `變更欄位：${changed.join("、")}` : `編號：${payload.code || "未填"}`);
   go("/materials");
   setToast(materialId ? "材料已更新" : "材料已建立");
+};
+
+function materialSpecificationPanel(materialId) {
+  return document.querySelector(`[data-material-specifications="${CSS.escape(String(materialId || ""))}"]`);
+}
+
+function materialSpecificationValues(scope, attribute) {
+  const read = (field) => scope?.querySelector(`[${attribute}="${field}"]`)?.value ?? "";
+  return { thickness: read("thickness"), width: read("width"), weight: read("weight") };
+}
+
+function refreshMaterialSpecificationPanel(materialId, feedback = null) {
+  ui.materialSpecificationFeedback = feedback ? { ...feedback, materialId } : null;
+  const panel = materialSpecificationPanel(materialId);
+  const material = materialById(materialId);
+  if (panel && material) panel.outerHTML = renderMaterialSpecificationSection(material);
+}
+
+function materialSpecificationUiResult(materialId, result, successMessage) {
+  if (result?.ok) {
+    ui.materialSpecificationEditId = null;
+    refreshMaterialSpecificationPanel(materialId, { ok: true, code: result.code || "OK", message: successMessage, error: successMessage });
+  } else {
+    refreshMaterialSpecificationPanel(materialId, { ok: false, code: result?.code || "MATERIAL_SPEC_INVALID_STATE", error: result?.error || "材料規格未儲存" });
+  }
+  return result;
+}
+
+window.addMaterialSpecification = function (materialId) {
+  const panel = materialSpecificationPanel(materialId);
+  const values = materialSpecificationValues(panel, "data-spec-add-field");
+  const result = window.MaterialSpecifications.addSpecification(materialId, values);
+  return materialSpecificationUiResult(materialId, result, "規格已新增");
+};
+
+window.startMaterialSpecificationEdit = function (materialId, specificationId) {
+  ui.materialSpecificationEditId = specificationId;
+  refreshMaterialSpecificationPanel(materialId);
+  return { ok: true, code: "OK" };
+};
+
+window.cancelMaterialSpecificationEdit = function (materialId) {
+  ui.materialSpecificationEditId = null;
+  refreshMaterialSpecificationPanel(materialId);
+  return { ok: true, code: "OK" };
+};
+
+window.updateMaterialSpecification = function (materialId, specificationId) {
+  const panel = materialSpecificationPanel(materialId);
+  const row = panel?.querySelector(`[data-material-spec-edit-row][data-specification-id="${CSS.escape(String(specificationId || ""))}"]`);
+  const values = materialSpecificationValues(row, "data-spec-edit-field");
+  const result = window.MaterialSpecifications.updateSpecification(materialId, specificationId, values);
+  return materialSpecificationUiResult(materialId, result, "規格已更新");
+};
+
+window.deleteMaterialSpecification = function (materialId, specificationId) {
+  if (!confirm("確定刪除這組厚度、寬度與重量規格？")) return { ok: false, code: "MATERIAL_SPEC_DELETE_CANCELLED", error: "已取消刪除" };
+  const result = window.MaterialSpecifications.deleteSpecification(materialId, specificationId);
+  return materialSpecificationUiResult(materialId, result, "規格已刪除");
 };
 
 function setCustomerFormValue(form, name, value) {
@@ -903,12 +1181,50 @@ window.setQuotePicker = function (type, value) {
     if (tpl) draft.sections.forEach((section) => (section.laborItems = JSON.parse(JSON.stringify(tpl.laborItems))));
   }
   if (type === "material" && ui.editingMaterial) {
+    const previous = draft.sections[ui.editingMaterial.sectionIndex].items[ui.editingMaterial.itemIndex];
+    if (previous?.line_id) {
+      delete ui.quoteCatalogSelections[previous.line_id];
+      delete ui.quoteCustomSelections[previous.line_id];
+      delete ui.quoteSpecificationSelections[previous.line_id];
+      delete ui.quoteSpecificationDraftSelections[previous.line_id];
+    }
     const mat = materialById(value);
     const item = mat ? itemFromMaterial(mat.id) : blankItem();
+    if (mat) {
+      item.thickness = "";
+      item.width = "";
+      item.weight = "";
+      delete item.material_specification_snapshot;
+    }
     draft.sections[ui.editingMaterial.sectionIndex].items[ui.editingMaterial.itemIndex] = item;
+    if (mat) ui.quoteCatalogSelections[item.line_id] = mat.id;
+    else ui.quoteCustomSelections[item.line_id] = true;
   }
   ui.picker = null;
   ui.pickerSearch = "";
+  saveStoredQuoteDraft();
+  render();
+};
+
+window.setCustomQuoteItem = function () {
+  const edit = ui.editingMaterial;
+  if (!edit || !ui.quoteDraft) return;
+  const previous = ui.quoteDraft.sections[edit.sectionIndex].items[edit.itemIndex];
+  if (previous?.line_id) {
+    delete ui.quoteCatalogSelections[previous.line_id];
+    delete ui.quoteCustomSelections[previous.line_id];
+    delete ui.quoteSpecificationSelections[previous.line_id];
+    delete ui.quoteSpecificationDraftSelections[previous.line_id];
+  }
+  const customItem = {
+    ...blankItem(),
+    line_id: previous?.line_id || id("line"),
+    name: previous?.material_id ? "" : previous?.name || "",
+    unit: previous?.material_id ? "件" : previous?.unit || "件",
+  };
+  ui.quoteDraft.sections[edit.sectionIndex].items[edit.itemIndex] = customItem;
+  ui.quoteCustomSelections[customItem.line_id] = true;
+  ui.picker = null;
   saveStoredQuoteDraft();
   render();
 };
@@ -917,21 +1233,179 @@ window.updateQuotePath = function (el, shouldRender = false) {
   if (!ui.quoteDraft) return;
   ui.quoteDraft[el.dataset.quotePath] = el.value;
   saveStoredQuoteDraft();
-  if (shouldRender) render();
+  if (shouldRender) setTimeout(render, 0);
+};
+
+window.updateQuoteListPath = function (el) {
+  if (!ui.quoteDraft) return;
+  ui.quoteDraft[el.dataset.quoteListPath] = String(el.value || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+  saveStoredQuoteDraft();
 };
 
 window.updateSectionField = function (el, shouldRender = false) {
   const section = ui.quoteDraft.sections[Number(el.dataset.section)];
   section[el.dataset.sectionField] = el.value;
   saveStoredQuoteDraft();
-  if (shouldRender) render();
+  if (shouldRender) setTimeout(render, 0);
 };
 
 window.updateLaborField = function (el, shouldRender = false) {
   const row = ui.quoteDraft.sections[Number(el.dataset.laborSection)].laborItems[Number(el.dataset.laborIndex)];
   row[el.dataset.laborField] = el.value;
   saveStoredQuoteDraft();
-  if (shouldRender) render();
+  if (shouldRender) setTimeout(render, 0);
+};
+
+function setQuoteLaborDetailFeedback(sectionIndex, rowId, fieldName, message) {
+  ui.quoteLaborDetailFeedback = ui.quoteLaborDetailFeedback || {};
+  const key = quoteLaborDetailFeedbackKey(sectionIndex, rowId, fieldName);
+  if (message) ui.quoteLaborDetailFeedback[key] = message;
+  else delete ui.quoteLaborDetailFeedback[key];
+}
+
+function clearQuoteLaborDetailFeedback(sectionIndex, rowId = "", fieldName = "") {
+  ui.quoteLaborDetailFeedback = ui.quoteLaborDetailFeedback || {};
+  const prefix = [sectionIndex, rowId || ""].filter((value) => value !== "").join(":");
+  Object.keys(ui.quoteLaborDetailFeedback).forEach((key) => {
+    if ((!prefix || key.startsWith(`${prefix}:`) || key === prefix)
+      && (!fieldName || key.endsWith(`:${fieldName}`))) {
+      delete ui.quoteLaborDetailFeedback[key];
+    }
+  });
+}
+
+window.initializeQuoteLaborDetailsForDraft = function () {
+  const draft = ui.quoteDraft;
+  if (!draft || !Array.isArray(draft.sections)) return { ok: false, changed: false, errors: [] };
+  let changed = false;
+  const errors = [];
+  draft.sections.forEach((section, sectionIndex) => {
+    if (section?.calculation_mode !== MaterialsQuoteDomain.EXCEL_FORWARD_CALCULATION_MODE) return;
+    const materialGateError = quoteLaborDetailSectionGateError(sectionIndex);
+    if (materialGateError) {
+      errors.push({
+        sectionIndex,
+        code: MaterialsQuoteDomain.QUOTE_LABOR_DETAIL_ERROR_CODES.INVALID_STATE,
+        error: materialGateError,
+      });
+      setQuoteLaborDetailFeedback(sectionIndex, "", "", materialGateError);
+      return;
+    }
+    const result = MaterialsQuoteDomain.initializeExcelLaborDetail({
+      section,
+      quoteStatus: draft.status || "draft",
+      actor: currentUser(),
+      at: new Date().toISOString(),
+    });
+    if (!result.ok) {
+      errors.push({ sectionIndex, code: result.code, error: result.error });
+      setQuoteLaborDetailFeedback(sectionIndex, "", "", result.error);
+      return;
+    }
+    setQuoteLaborDetailFeedback(sectionIndex, "", "", "");
+    if (result.changed) {
+      draft.sections[sectionIndex] = result.section;
+      changed = true;
+    }
+  });
+  if (changed) saveStoredQuoteDraft(false);
+  return { ok: errors.length === 0, changed, errors };
+};
+
+window.updateExcelLaborDetailField = function (el) {
+  const sectionIndex = Number(el?.dataset?.laborDetailSection);
+  const rowId = String(el?.dataset?.laborRowId || "");
+  const fieldName = String(el?.dataset?.laborDetailField || "");
+  const section = ui.quoteDraft?.sections?.[sectionIndex];
+  const selected = section ? MaterialsQuoteDomain.selectExcelLaborDetail(section) : null;
+  const previousRow = selected?.rows?.find((row) => row.row_id === rowId);
+  const materialGateError = quoteLaborDetailSectionGateError(sectionIndex);
+  if (materialGateError) {
+    const result = {
+      ok: false,
+      code: MaterialsQuoteDomain.QUOTE_LABOR_DETAIL_ERROR_CODES.INVALID_STATE,
+      error: materialGateError,
+      changed: false,
+      section: section ? MaterialsQuoteDomain.deepClone(section) : {},
+    };
+    setQuoteLaborDetailFeedback(sectionIndex, "", "", materialGateError);
+    render();
+    return result;
+  }
+  const result = MaterialsQuoteDomain.applyExcelLaborDetailOverride({
+    section,
+    quoteStatus: ui.quoteDraft?.status || "draft",
+    actor: currentUser(),
+    rowId,
+    patch: { [fieldName]: el?.value },
+    at: new Date().toISOString(),
+  });
+  if (!result.ok) {
+    if (el && previousRow && Object.prototype.hasOwnProperty.call(previousRow, fieldName)) {
+      el.value = previousRow[fieldName];
+    }
+    setQuoteLaborDetailFeedback(sectionIndex, rowId, fieldName, result.error || "輸入值無效");
+    render();
+    return result;
+  }
+  ui.quoteDraft.sections[sectionIndex] = result.section;
+  clearQuoteLaborDetailFeedback(sectionIndex, rowId, fieldName);
+  setQuoteLaborDetailFeedback(sectionIndex, "", "", "");
+  saveStoredQuoteDraft();
+  render();
+  return result;
+};
+
+window.clearExcelLaborDetailFieldError = function (el) {
+  const sectionIndex = Number(el?.dataset?.laborDetailSection);
+  const rowId = String(el?.dataset?.laborRowId || "");
+  const fieldName = String(el?.dataset?.laborDetailField || "");
+  setQuoteLaborDetailFeedback(sectionIndex, rowId, fieldName, "");
+  const cell = typeof el?.closest === "function" ? el.closest(".excel-labor-cell") : null;
+  cell?.classList.remove("has-error");
+  cell?.querySelector(".excel-labor-field-error")?.remove();
+};
+
+window.resetExcelLaborDetail = function (sectionIndex) {
+  const section = ui.quoteDraft?.sections?.[Number(sectionIndex)];
+  const selected = section ? MaterialsQuoteDomain.selectExcelLaborDetail(section) : null;
+  if (!selected?.has_overrides) {
+    return { ok: true, code: MaterialsQuoteDomain.QUOTE_LABOR_DETAIL_ERROR_CODES.OK, changed: false, section };
+  }
+  if (!confirm("確定將本區所有人工調整重置為預設值嗎？")) {
+    return { ok: false, code: "CANCELLED", error: "已取消重置", changed: false, section };
+  }
+  const result = MaterialsQuoteDomain.resetExcelLaborDetailOverrides({
+    section,
+    quoteStatus: ui.quoteDraft?.status || "draft",
+    actor: currentUser(),
+    at: new Date().toISOString(),
+  });
+  if (!result.ok) {
+    setQuoteLaborDetailFeedback(Number(sectionIndex), "", "", result.error || "無法重置工料明細");
+    render();
+    return result;
+  }
+  ui.quoteDraft.sections[Number(sectionIndex)] = result.section;
+  clearQuoteLaborDetailFeedback(Number(sectionIndex));
+  if (result.changed) saveStoredQuoteDraft();
+  render();
+  return result;
+};
+
+window.updateLaborConfigField = function (el) {
+  const sectionIndex = Number(el?.dataset?.laborConfigSection);
+  const section = ui.quoteDraft?.sections?.[sectionIndex];
+  const result = {
+    ok: false,
+    code: MaterialsQuoteDomain.QUOTE_LABOR_DETAIL_ERROR_CODES.FIELD_NOT_EDITABLE,
+    error: "公式設定不可直接改寫，請調整下方工料明細。",
+    changed: false,
+    section: section ? MaterialsQuoteDomain.deepClone(section) : {},
+  };
+  setQuoteLaborDetailFeedback(sectionIndex, "", "", result.error);
+  render();
+  return result;
 };
 
 window.setLaborBalancer = function (sectionIndex, laborIndex) {
@@ -970,8 +1444,18 @@ window.addQuoteItem = function (sectionIndex) {
 
 window.removeQuoteItem = function (sectionIndex, itemIndex) {
   const items = ui.quoteDraft.sections[sectionIndex].items;
+  const removed = items[itemIndex];
+  if (removed?.line_id) {
+    delete ui.quoteCatalogSelections[removed.line_id];
+    delete ui.quoteCustomSelections[removed.line_id];
+    delete ui.quoteSpecificationSelections[removed.line_id];
+    delete ui.quoteSpecificationDraftSelections[removed.line_id];
+  }
   if (items.length > 1) items.splice(itemIndex, 1);
-  else items[0] = blankItem();
+  else {
+    items[0] = blankItem();
+    ui.quoteCustomSelections[items[0].line_id] = true;
+  }
   ui.editingMaterial = null;
   saveStoredQuoteDraft();
   render();
@@ -998,6 +1482,9 @@ window.openMaterialDrawer = function (sectionIndex, itemIndex) {
 };
 
 window.closeMaterialDrawer = function () {
+  const edit = ui.editingMaterial;
+  const item = edit ? ui.quoteDraft?.sections?.[edit.sectionIndex]?.items?.[edit.itemIndex] : null;
+  if (item?.line_id) delete ui.quoteSpecificationDraftSelections[item.line_id];
   ui.editingMaterial = null;
   ui.picker = null;
   saveStoredQuoteDraft();
@@ -1008,9 +1495,139 @@ window.updateItemField = function (el, shouldRender = false) {
   const edit = ui.editingMaterial;
   if (!edit) return;
   const item = ui.quoteDraft.sections[edit.sectionIndex].items[edit.itemIndex];
-  item[el.dataset.itemField] = el.value;
+  const fieldName = el.dataset.itemField;
+  if (item.item_kind === "catalog" && item.material_id && ["thickness", "width", "weight", "dimension_unit"].includes(fieldName)) {
+    const result = { ok: false, code: "QUOTE_SPEC_FIELD_PROTECTED", error: "材料主檔品項請使用厚度與寬度選單" };
+    setToast(result.error);
+    return result;
+  }
+  const value = el.type === "checkbox" ? el.checked : el.value;
+  const sourceQuote = ui.quoteDraftSource && ui.quoteDraftSource !== "new" ? quoteById(ui.quoteDraftSource) : null;
+  const result = MaterialsQuoteDomain.applyQuoteItemPatch(item, { [fieldName]: value }, {
+    status: sourceQuote?.status || "draft",
+    canEditPricing: canEditMaterialPrices(),
+  });
+  ui.quoteDraft.sections[edit.sectionIndex].items[edit.itemIndex] = result.item;
+  if (result.validationErrors.length) {
+    setToast(result.validationErrors[0]);
+    render();
+    return;
+  }
+  if (result.rejectedFields.length) {
+    setToast("此欄位受角色或單據狀態保護");
+    render();
+    return;
+  }
   saveStoredQuoteDraft();
-  if (shouldRender) render();
+  if (shouldRender) setTimeout(() => {
+    if (document.activeElement?.matches?.("[data-item-field]")) return;
+    render();
+  }, 0);
+  return { ok: true, code: "OK", error: "", item: result.item };
+};
+
+function quoteSpecificationControlResult(ok, code, error = "") {
+  return { ok, code, error };
+}
+
+function quoteSpecificationControlError(control, result) {
+  const error = control?.querySelector("[data-quote-spec-error]");
+  if (error) {
+    error.textContent = result.error || "材料規格選擇失敗";
+    error.dataset.code = result.code || "QUOTE_SPEC_INVALID_DATA";
+    error.classList.add("is-visible");
+  }
+  return result;
+}
+
+window.changeQuoteSpecificationThickness = function (select) {
+  const controls = select?.closest?.("[data-quote-spec-controls]");
+  if (!controls) return quoteSpecificationControlResult(false, "QUOTE_SPEC_INVALID_STATE", "找不到材料規格選擇區");
+  const materialId = controls.dataset.materialId || "";
+  const lineId = controls.dataset.lineId || "";
+  const widthSelect = controls.querySelector("[data-quote-spec-width]");
+  const weight = controls.querySelector("[data-quote-spec-weight]");
+  const thickness = select.value;
+  if (lineId) ui.quoteSpecificationDraftSelections[lineId] = { thickness, width: "" };
+  controls.dataset.legacyRetained = "false";
+  controls.dataset.pendingSelection = thickness ? "true" : "false";
+  if (weight) weight.innerHTML = `<strong>${thickness ? "待選寬度" : "尚未選擇"}</strong><small>選定完整組合後自動帶入</small>`;
+  if (!widthSelect) return quoteSpecificationControlResult(false, "QUOTE_SPEC_INVALID_STATE", "找不到寬度選單");
+  widthSelect.value = "";
+  widthSelect.innerHTML = `<option value="">${thickness ? "請選擇寬度" : "請先選厚度"}</option>`;
+  widthSelect.disabled = true;
+  const error = controls.querySelector("[data-quote-spec-error]");
+  if (error) {
+    error.textContent = "";
+    error.dataset.code = "";
+    error.classList.remove("is-visible");
+  }
+  if (!thickness) return quoteSpecificationControlResult(false, "QUOTE_SPEC_THICKNESS_REQUIRED", "請先選擇厚度");
+  const result = window.MaterialSpecifications.listWidthOptions(materialId, thickness);
+  if (!result?.ok) return quoteSpecificationControlError(controls, result);
+  result.value.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.textContent = String(value);
+    widthSelect.appendChild(option);
+  });
+  widthSelect.disabled = result.value.length === 0;
+  if (!result.value.length) return quoteSpecificationControlError(controls, quoteSpecificationControlResult(false, "QUOTE_SPEC_PAIR_NOT_FOUND", "此厚度沒有可用寬度"));
+  return quoteSpecificationControlResult(true, "OK");
+};
+
+window.changeQuoteSpecificationWidth = function (select) {
+  const controls = select?.closest?.("[data-quote-spec-controls]");
+  if (!controls) return quoteSpecificationControlResult(false, "QUOTE_SPEC_INVALID_STATE", "找不到材料規格選擇區");
+  const thickness = controls.querySelector("[data-quote-spec-thickness]")?.value || "";
+  if (!thickness) return quoteSpecificationControlError(controls, quoteSpecificationControlResult(false, "QUOTE_SPEC_THICKNESS_REQUIRED", "請先選擇厚度"));
+  if (!select.value) return quoteSpecificationControlError(controls, quoteSpecificationControlResult(false, "QUOTE_SPEC_WIDTH_REQUIRED", "請選擇寬度"));
+  const result = window.QuoteMaterialSpecifications.selectSpecification({
+    sectionIndex: Number(controls.dataset.sectionIndex),
+    itemIndex: Number(controls.dataset.itemIndex),
+    materialId: controls.dataset.materialId || "",
+    thickness,
+    width: select.value,
+  });
+  if (!result?.ok) return quoteSpecificationControlError(controls, result);
+  const lineId = controls.dataset.lineId || "";
+  if (lineId) delete ui.quoteSpecificationDraftSelections[lineId];
+  render();
+  return result;
+};
+
+window.completeMaterialDrawer = function () {
+  const edit = ui.editingMaterial;
+  const item = edit ? ui.quoteDraft?.sections?.[edit.sectionIndex]?.items?.[edit.itemIndex] : null;
+  if (!item) return quoteSpecificationControlResult(false, "QUOTE_SPEC_ITEM_NOT_FOUND", "找不到報價材料");
+  if (item.item_kind === "catalog" && item.material_id) {
+    const controls = document.querySelector("[data-quote-spec-controls]");
+    const thickness = controls?.querySelector("[data-quote-spec-thickness]")?.value || "";
+    const width = controls?.querySelector("[data-quote-spec-width]")?.value || "";
+    const legacyRetained = controls?.dataset.legacyRetained === "true";
+    if (!thickness) {
+      const result = quoteSpecificationControlResult(false, "QUOTE_SPEC_THICKNESS_REQUIRED", "請先選擇厚度");
+      setToast(result.error);
+      return result;
+    }
+    if (!width) {
+      const result = quoteSpecificationControlResult(false, "QUOTE_SPEC_WIDTH_REQUIRED", "請選擇寬度");
+      setToast(result.error);
+      return result;
+    }
+    const snapshot = item.material_specification_snapshot;
+    const snapshotMatches = snapshot
+      && Number(snapshot.thickness) === Number(thickness)
+      && Number(snapshot.width) === Number(width)
+      && Number(snapshot.weight) === Number(item.weight);
+    if (!snapshotMatches && !legacyRetained) {
+      const result = quoteSpecificationControlResult(false, "QUOTE_SPEC_SELECTION_REQUIRED", "請重新選擇完整的厚度與寬度");
+      setToast(result.error);
+      return result;
+    }
+  }
+  closeMaterialDrawer();
+  return quoteSpecificationControlResult(true, "OK");
 };
 
 window.discardQuoteDraft = function (quoteId) {
@@ -1023,26 +1640,144 @@ window.discardQuoteDraft = function (quoteId) {
   else go("/quotes");
 };
 
+const QUOTE_REJECTED_FIELD_LABELS = Object.freeze({
+  status: "報價狀態",
+  manualTotal: "手動總價",
+  line_id: "明細識別",
+  material_id: "材料來源",
+  item_kind: "品項來源",
+  pricing_type: "計價類型",
+  thickness: "厚度",
+  width: "寬度",
+  length: "長度",
+  weight: "重量",
+  dimension_unit: "尺寸單位",
+  wall_thickness_mm: "壁厚",
+  material_specification_snapshot: "材料規格快照",
+  formula_version: "公式版本",
+  formula_source: "公式來源",
+  formula_source_id: "公式來源",
+  formula_source_version: "公式版本",
+  formula_source_snapshot: "公式快照",
+  density_factor: "重量換算係數",
+  cost_price: "成本價",
+  cost_price_status: "成本價狀態",
+  standard_budget_unit_price: "標準預算價",
+  standard_budget_source: "標準預算價來源",
+  standard_budget_version: "標準預算價版本",
+  catalog_sale_unit_price: "目錄售價",
+  catalog_sale_price_source: "目錄售價來源",
+  catalog_sale_price_version: "目錄售價版本",
+  catalog_discount_factor: "目錄折數",
+  default_actual_unit_price: "預設案件單價",
+  price_source: "價格來源",
+  price_version: "價格版本",
+  catalog_review_required: "材料覆核狀態",
+  catalog_review_reason: "材料覆核原因",
+  category: "材料分類",
+  price_effective_date: "價格生效日",
+  price_is_override: "案件價格狀態",
+  labor_pricing_type: "工錢計價類型",
+  labor_detail_contract: "工料明細",
+});
+
+function quotePersistencePathValue(source, path) {
+  return String(path || "").split(".").reduce((value, key) => value == null ? undefined : value[key], source);
+}
+
+function quotePersistenceValuesEqual(left, right) {
+  if (Object.is(left, right)) return true;
+  if ((left == null || left === "") && (right == null || right === "")) return true;
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch (error) {
+    return false;
+  }
+}
+
+function quotePersistenceTargetsExistingItem(path, draft, existing) {
+  const match = String(path || "").match(/^sections\.(\d+)\.items\.(\d+)\./);
+  if (!match) return true;
+  const sectionIndex = Number(match[1]);
+  const itemIndex = Number(match[2]);
+  const draftItem = draft?.sections?.[sectionIndex]?.items?.[itemIndex];
+  const existingItems = existing?.sections?.[sectionIndex]?.items || [];
+  if (draftItem?.line_id && existingItems.some((item) => item?.line_id === draftItem.line_id)) return true;
+  return Boolean(existingItems[itemIndex]);
+}
+
+function quotePersistenceRejectedMessage(draft, sanitized, existing) {
+  const rejectedFields = Array.isArray(sanitized?.rejectedFields) ? sanitized.rejectedFields : [];
+  const changedFields = rejectedFields.filter((path) => quotePersistenceTargetsExistingItem(path, draft, existing)
+    && !quotePersistenceValuesEqual(
+      quotePersistencePathValue(draft, path),
+      quotePersistencePathValue(sanitized?.quote, path),
+    ));
+  if (!changedFields.length) return "";
+  const fieldNames = changedFields.map((path) => String(path).split(".").pop());
+  const labels = Array.from(new Set(fieldNames.map((field) => QUOTE_REJECTED_FIELD_LABELS[field] || "受保護資料")));
+  const visibleLabels = labels.slice(0, 3).join("、") + (labels.length > 3 ? "等欄位" : "");
+  const specificationFields = new Set(["thickness", "width", "weight", "dimension_unit", "material_specification_snapshot"]);
+  if (fieldNames.some((field) => specificationFields.has(field))) {
+    return `報價單未保存：${visibleLabels}屬於材料規格的受保護欄位，請重新選擇材料規格。`;
+  }
+  return `報價單未保存：${visibleLabels}屬於受保護欄位，請使用畫面提供的編輯流程。`;
+}
+
 window.saveQuote = function (event, quoteId) {
   event.preventDefault();
   const draft = ui.quoteDraft;
   const existingRecord = quoteId ? quoteById(quoteId) : null;
+  const requestedStatus = draft?.status || "draft";
+  if (requestedStatus !== (existingRecord?.status || "draft") && ["pending_approval", "approved", "returned"].includes(requestedStatus)) {
+    setToast("審核狀態只能透過送審、核准或退回 action 變更");
+    return;
+  }
   if (quoteIsLocked(existingRecord)) {
     setToast("已寄出或結案的報價不能直接覆寫，請建立修訂版");
     return;
   }
-  if ((draft.status === "sent" || draft.status === "won") && !canApproveQuotes()) {
-    setToast("目前帳號沒有核准並寄出報價的權限");
+  const transition = MaterialsQuoteDomain.validateQuoteStatusTransition(existingRecord?.status, draft.status || "draft", {
+    canApprove: canApproveQuotes(),
+  });
+  if (!transition.ok) {
+    setToast(transition.error);
     return;
   }
-  const draftTotals = computeQuote(draft);
-  const validation = MaterialsQuoteDomain.validateQuoteForStatus(draft, draftTotals, draft.status, { template: templateById(draft.template_id) });
+  const existing = quoteId ? JSON.parse(JSON.stringify(quoteById(quoteId) || {})) : null;
+  const sanitized = MaterialsQuoteDomain.sanitizeQuoteForPersistence(draft, existing, state.materials, {
+    canEditPricing: canEditMaterialPrices(),
+    canApprove: canApproveQuotes(),
+    defaultTaxRate: state.company.defaultTaxRate || 5,
+    template: templateById(draft.template_id),
+    trustedCatalogSelections: ui.quoteCatalogSelections,
+    trustedCustomSelections: ui.quoteCustomSelections,
+    trustedSpecificationSelections: ui.quoteSpecificationSelections,
+  });
+  if (sanitized.blockedByStatus) {
+    setToast("這張報價目前不可直接修改，請依狀態流程操作");
+    return;
+  }
+  if (sanitized.validationErrors.length) {
+    setToast(sanitized.validationErrors[0]);
+    return;
+  }
+  const rejectedMessage = quotePersistenceRejectedMessage(draft, sanitized, existing);
+  if (rejectedMessage) {
+    setToast(rejectedMessage);
+    return;
+  }
+  const safeDraft = normalizeQuoteRecord(sanitized.quote);
+  const draftTotals = computeQuote(safeDraft);
+  const validation = MaterialsQuoteDomain.validateQuoteForStatus(safeDraft, draftTotals, safeDraft.status, {
+    template: templateById(safeDraft.template_id),
+    enforceP0: true,
+  });
   if (!validation.ok) {
     setToast(validation.errors[0]);
     return;
   }
-  const existing = quoteId ? JSON.parse(JSON.stringify(quoteById(quoteId) || {})) : null;
-  const payload = normalizeQuoteRecord(JSON.parse(JSON.stringify(draft)));
+  const payload = safeDraft;
   payload.id = quoteId || id("q");
   payload.quote_no = quoteId ? payload.quote_no : reserveNextQuoteNo(payload.quote_date);
   payload.revision_group_id = payload.revision_group_id || payload.id;
@@ -1055,7 +1790,6 @@ window.saveQuote = function (event, quoteId) {
     if (payload.status === "pending_approval") payload.submitted_for_approval_at = payload.updated_at;
     if (payload.status === "lost") payload.lost_at = payload.lost_at || payload.updated_at;
   }
-  delete payload.manualTotal;
   if (quoteIsLocked(payload) && !payload.document_snapshot) {
     payload.document_snapshot = createQuoteDocumentSnapshot(payload, computeQuote(payload));
     if (["sent", "won", "expired"].includes(payload.status)) payload.sent_at = payload.sent_at || payload.document_snapshot.issued_at;
@@ -1084,15 +1818,234 @@ window.saveQuote = function (event, quoteId) {
   setToast(quoteId ? "報價單已更新" : "報價單已建立");
 };
 
-window.setQuoteStatus = function (quoteId, status) {
+function localApprovalFailure(code, error, quote = null) {
+  return {
+    ok: false,
+    code,
+    error,
+    quote: quote ? MaterialsQuoteDomain.deepClone(quote) : null,
+  };
+}
+
+function presentLocalApprovalFailure(result, options = {}) {
+  if (!options.silent && result?.error) setToast(result.error);
+  return result;
+}
+
+function currentApprovalActor() {
+  const actor = currentUser();
+  return actor ? {
+    id: actor.id,
+    account: actor.account,
+    name: actor.name,
+    role: actor.role,
+    is_active: actor.is_active !== false,
+  } : null;
+}
+
+function applyLocalApprovalState(result, quoteIndex, extraQuotes = []) {
+  const previousQuote = quoteIndex >= 0 ? state.quotes[quoteIndex] : null;
+  const previousHistory = state.quote_approval_history;
+  const previousHead = state.quote_approval_history_head;
+  if (quoteIndex >= 0 && result.quote) state.quotes[quoteIndex] = normalizeQuoteRecord(result.quote);
+  if (quoteIndex >= 0 && result.original) state.quotes[quoteIndex] = normalizeQuoteRecord(result.original);
+  extraQuotes.forEach((quote) => state.quotes.push(normalizeQuoteRecord(quote)));
+  state.quote_approval_history = MaterialsQuoteDomain.deepClone(result.history || []);
+  state.quote_approval_history_head = String(result.history_head || "");
+  if (saveState()) return true;
+  if (quoteIndex >= 0 && previousQuote) state.quotes[quoteIndex] = previousQuote;
+  if (extraQuotes.length) state.quotes.splice(state.quotes.length - extraQuotes.length, extraQuotes.length);
+  state.quote_approval_history = previousHistory;
+  state.quote_approval_history_head = previousHead;
+  return false;
+}
+
+function localApprovalOperationToken(quote) {
+  return {
+    quote_id: String(quote?.id || ""),
+    status: String(quote?.status || "draft"),
+    version_no: Number(quote?.quote_version || Number(quote?.revision_no || 0) + 1),
+    submission_id: String(quote?.approval_submission_id || ""),
+    history_head: String(state.quote_approval_history_head || ""),
+  };
+}
+
+function localApprovalOperationIsCurrent(token) {
+  const current = state.quotes.find((record) => record.id === token.quote_id);
+  if (!current) return false;
+  return String(current.status || "draft") === token.status
+    && Number(current.quote_version || Number(current.revision_no || 0) + 1) === token.version_no
+    && String(current.approval_submission_id || "") === token.submission_id
+    && String(state.quote_approval_history_head || "") === token.history_head;
+}
+
+async function runLocalQuoteApprovalAction(quoteId, action, options = {}) {
+  const quoteIndex = state.quotes.findIndex((record) => record.id === quoteId);
+  const quote = quoteIndex >= 0 ? state.quotes[quoteIndex] : null;
+  if (!quote) return presentLocalApprovalFailure(localApprovalFailure("QUOTE_NOT_FOUND", "找不到指定報價"), options);
+  const at = String(options.at || new Date().toISOString());
+  const actor = currentApprovalActor();
+  const operationToken = localApprovalOperationToken(quote);
+  if (action === "submit" && !MaterialsQuoteDomain.isKnownLocalQuoteActor(actor)) {
+    return presentLocalApprovalFailure(localApprovalFailure(
+      "SUBMIT_ROLE_DENIED",
+      "目前角色不可提交報價",
+      quote,
+    ), options);
+  }
+  if (["approve", "return"].includes(action) && !MaterialsQuoteDomain.isLocalQuoteReviewer(actor)) {
+    return presentLocalApprovalFailure(localApprovalFailure(
+      "REVIEW_PERMISSION_DENIED",
+      "只有管理人員或老闆可以核准或退回報價",
+      quote,
+    ), options);
+  }
+  const totals = computeQuote(quote);
+  if (action === "approve") {
+    const validation = MaterialsQuoteDomain.validateQuoteForStatus(quote, totals, "approved", {
+      template: templateById(quote.template_id),
+      enforceP0: true,
+    });
+    if (!validation.ok) return presentLocalApprovalFailure(localApprovalFailure("QUOTE_VALIDATION_FAILED", validation.errors[0], quote), options);
+  }
+  const documentSnapshot = ["submit", "approve"].includes(action)
+    ? createQuoteDocumentSnapshot(quote, totals, {
+      issuedAt: at,
+      issuedBy: actor ? { id: actor.id, name: actor.name, account: actor.account } : null,
+    })
+    : null;
+  const pendingQueueRecord = ["approve", "return", "withdraw"].includes(action)
+    ? MaterialsQuoteDomain.selectPendingQuoteApprovals([quote])[0] || null
+    : null;
+  const result = await MaterialsQuoteDomain.applyLocalQuoteApprovalAction({
+    quote,
+    action,
+    actor,
+    at,
+    reason: options.reason,
+    totals,
+    validationContext: {
+      template: templateById(quote.template_id),
+      enforceP0: true,
+    },
+    documentSnapshot,
+    history: state.quote_approval_history || [],
+    expectedHistoryHead: state.quote_approval_history_head || "",
+    eventId: options.eventId || id("qa"),
+    submissionId: options.submissionId || id("qs"),
+    expectedSubmissionId: options.expectedSubmissionId !== undefined ? options.expectedSubmissionId : pendingQueueRecord?.submission_id,
+    expectedVersionNo: options.expectedVersionNo !== undefined ? options.expectedVersionNo : pendingQueueRecord?.version_no,
+  });
+  if (!result.ok) return presentLocalApprovalFailure(result, options);
+  if (!localApprovalOperationIsCurrent(operationToken)) {
+    return presentLocalApprovalFailure(localApprovalFailure(
+      "APPROVAL_QUEUE_INCONSISTENT",
+      "報價審核狀態已被其他操作更新，請重新整理後再試",
+      state.quotes.find((record) => record.id === quoteId) || quote,
+    ), options);
+  }
+  if (!applyLocalApprovalState(result, quoteIndex)) {
+    return presentLocalApprovalFailure(localApprovalFailure("LOCAL_PERSISTENCE_FAILED", "本機審核結果儲存失敗，原狀態未變", quote), options);
+  }
+  if (action !== "withdraw") {
+    logWorkEvent("status", `報價審核：${workLogRecordTitle("quotes", result.quote)}`, {
+      entityType: "quotes",
+      entityId: result.quote.id,
+      entityName: workLogRecordTitle("quotes", result.quote),
+      detail: `${result.event.from_status} → ${result.event.to_status}`,
+    });
+  }
+  if (!options.silent) {
+    setToast(action === "withdraw"
+      ? "已撤回送審"
+      : result.quote?.status === "approved"
+        ? "報價已核准"
+        : result.quote?.status === "pending_approval"
+          ? "報價已送出，等待核准"
+          : "報價已退回");
+    render();
+  }
+  return { ...result, quote: normalizeQuoteRecord(result.quote) };
+}
+
+async function runLocalQuoteRevision(quoteId, options = {}) {
+  const quoteIndex = state.quotes.findIndex((record) => record.id === quoteId);
+  const quote = quoteIndex >= 0 ? state.quotes[quoteIndex] : null;
+  if (!quote) return presentLocalApprovalFailure(localApprovalFailure("QUOTE_NOT_FOUND", "找不到指定報價"), options);
+  const at = String(options.at || new Date().toISOString());
+  const newQuoteId = String(options.newQuoteId || id("q"));
+  const result = await MaterialsQuoteDomain.createLocalQuoteRevision({
+    quote,
+    quotes: state.quotes,
+    actor: currentApprovalActor(),
+    at,
+    newQuoteId,
+    ownerId: currentUser()?.id || quote.owner_id || "",
+    quoteDate: options.quoteDate || dateToday(),
+    validUntil: options.validUntil || MaterialsQuoteDomain.addCalendarDays(dateToday(), 7),
+    nextFollowUp: options.nextFollowUp || MaterialsQuoteDomain.addCalendarDays(dateToday(), 3),
+    history: state.quote_approval_history || [],
+    expectedHistoryHead: state.quote_approval_history_head || "",
+    eventId: options.eventId || id("qa"),
+  });
+  if (!result.ok) return presentLocalApprovalFailure(result, options);
+  if (!applyLocalApprovalState(result, quoteIndex, [result.revision])) {
+    return presentLocalApprovalFailure(localApprovalFailure("LOCAL_PERSISTENCE_FAILED", "本機修訂版儲存失敗，原版本未變", quote), options);
+  }
+  logRecordChange("quotes", "create", result.revision, `由 ${quote.quote_no} ${quoteRevisionLabel(quote)} 建立 ${quoteRevisionLabel(result.revision)}`);
+  if (options.navigate) {
+    ui.quoteDraft = null;
+    ui.quoteDraftSource = null;
+    go(`/quotes/${result.revision.id}/edit`);
+  } else if (!options.silent) {
+    setToast("已建立新的草稿版本");
+    render();
+  }
+  return {
+    ...result,
+    original: normalizeQuoteRecord(result.original),
+    revision: normalizeQuoteRecord(result.revision),
+  };
+}
+
+window.QuoteApprovalActions = Object.freeze({
+  submit: (quoteId, options = {}) => runLocalQuoteApprovalAction(quoteId, "submit", options),
+  approve: (quoteId, options = {}) => runLocalQuoteApprovalAction(quoteId, "approve", options),
+  return: (quoteId, options = {}) => runLocalQuoteApprovalAction(quoteId, "return", options),
+  withdraw: (quoteId, options = {}) => runLocalQuoteApprovalAction(quoteId, "withdraw", options),
+  createRevision: (quoteId, options = {}) => runLocalQuoteRevision(quoteId, options),
+});
+
+window.QuoteApprovalSelectors = Object.freeze({
+  state: (quoteId) => MaterialsQuoteDomain.selectCanonicalQuoteApprovalState(quoteById(quoteId)),
+  pending: () => MaterialsQuoteDomain.selectPendingQuoteApprovals(state.quotes),
+  inconsistentPending: () => MaterialsQuoteDomain.selectApprovalQueueInconsistencies(state.quotes),
+  history: (quoteOrGroupId = "") => MaterialsQuoteDomain.selectQuoteApprovalHistory(state.quote_approval_history || [], quoteOrGroupId),
+  verifyHistory: () => MaterialsQuoteDomain.validateQuoteApprovalHistory(
+    state.quote_approval_history || [],
+    state.quote_approval_history_head || "",
+  ),
+});
+
+window.submitQuoteForApproval = (quoteId, options = {}) => window.QuoteApprovalActions.submit(quoteId, options);
+window.approveQuote = (quoteId, options = {}) => window.QuoteApprovalActions.approve(quoteId, options);
+window.returnQuoteForRevision = (quoteId, reason, options = {}) => window.QuoteApprovalActions.return(quoteId, { ...options, reason });
+window.withdrawQuoteSubmission = (quoteId, options = {}) => window.QuoteApprovalActions.withdraw(quoteId, options);
+
+window.setQuoteStatus = function (quoteId, status, reason = "") {
   const quote = quoteById(quoteId);
   if (!quote) return;
-  if (status === "sent" && !canApproveQuotes()) {
-    setToast("目前帳號沒有核准並寄出報價的權限");
-    return;
+  if (status === "pending_approval") return window.QuoteApprovalActions.submit(quoteId);
+  if (quote.status === "pending_approval" && ["approved", "sent"].includes(status)) {
+    return window.QuoteApprovalActions.approve(quoteId);
   }
-  if (quote.status === "pending_approval" && status === "draft" && !canApproveQuotes()) {
-    setToast("只有核准人員可以退回報價");
+  if (quote.status === "pending_approval" && ["returned", "draft"].includes(status)) {
+    const returnReason = String(reason || prompt("請輸入退回原因") || "").trim();
+    return window.QuoteApprovalActions.return(quoteId, { reason: returnReason });
+  }
+  const transition = MaterialsQuoteDomain.validateQuoteStatusTransition(quote.status, status, { canApprove: canApproveQuotes() });
+  if (!transition.ok) {
+    setToast(transition.error);
     return;
   }
   if (status === "lost" && !quote.lost_reason) {
@@ -1101,7 +2054,10 @@ window.setQuoteStatus = function (quoteId, status) {
     quote.lost_reason = reason.trim();
   }
   const totals = computeQuote(quote);
-  const validation = MaterialsQuoteDomain.validateQuoteForStatus(quote, totals, status, { template: templateById(quote.template_id) });
+  const validation = MaterialsQuoteDomain.validateQuoteForStatus(quote, totals, status, {
+    template: templateById(quote.template_id),
+    enforceP0: true,
+  });
   if (!validation.ok) {
     setToast(validation.errors[0]);
     return;
@@ -1131,6 +2087,9 @@ window.setQuoteStatus = function (quoteId, status) {
 window.createQuoteRevision = function (quoteId) {
   const original = quoteById(quoteId);
   if (!original) return;
+  if (original.status === "approved") {
+    return window.QuoteApprovalActions.createRevision(quoteId, { navigate: true });
+  }
   if (original.is_superseded) {
     setToast("此版本已有後續修訂版，請從最新版本繼續修訂");
     return;
@@ -1187,16 +2146,48 @@ function downloadBackupBundle(bundle, suffix = "") {
   URL.revokeObjectURL(url);
 }
 
-window.exportDataBackup = async function (suffix = "") {
-  if (!requirePermission("edit_company_settings", "只有具備公司設定權限的人員可以下載完整備份")) return;
+async function createCurrentBackupBundle() {
   const accounts = await migrateLegacyAccountPasswords();
-  const bundle = MaterialsQuoteDomain.createBackupBundle({
+  let bugReports;
+  if (typeof BugReportStore !== "undefined") {
+    const exportedBugReports = await BugReportStore.exportForBackup();
+    if (!exportedBugReports.ok) throw new Error(exportedBugReports.code);
+    bugReports = exportedBugReports.value;
+  }
+  return MaterialsQuoteDomain.createBackupBundle({
     state,
     accounts: accounts.map(({ password, ...account }) => account),
     workLogs: loadWorkLogs(),
+    bugReports,
     exportedAt: new Date().toISOString(),
-    appVersion: "941025-001",
+    appVersion: MaterialsQuoteDomain.BACKUP_APP_VERSION,
   });
+}
+
+function captureRestoreStorage() {
+  return Object.keys(localStorage).reduce((snapshot, key) => {
+    snapshot[key] = localStorage.getItem(key);
+    return snapshot;
+  }, {});
+}
+
+function rollbackRestoreStorage(snapshot) {
+  Object.keys(localStorage).filter((key) => !Object.prototype.hasOwnProperty.call(snapshot, key)).forEach((key) => localStorage.removeItem(key));
+  Object.entries(snapshot).forEach(([key, value]) => {
+    if (value == null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  });
+}
+
+window.exportDataBackup = async function (suffix = "") {
+  if (!requirePermission("edit_company_settings", "只有具備公司設定權限的人員可以下載完整備份")) return;
+  let bundle;
+  try {
+    bundle = await createCurrentBackupBundle();
+  } catch (error) {
+    setToast(`備份未建立：${error instanceof Error ? error.message : "資料驗證失敗"}`);
+    return null;
+  }
   downloadBackupBundle(bundle, suffix);
   logWorkEvent("backup", "下載完整資料備份", { entityType: "settings", detail: `格式：${bundle.schema}` });
   setToast("完整備份已下載");
@@ -1219,27 +2210,128 @@ window.importDataBackup = async function (event) {
     input.value = "";
     return;
   }
-  const validation = MaterialsQuoteDomain.validateBackupBundle(bundle);
+  const validation = await MaterialsQuoteDomain.validateBackupBundle(bundle);
   if (!validation.ok) {
     setToast(validation.error);
     input.value = "";
     return;
   }
-  if (!confirm("還原會以備份內容取代目前瀏覽器內的全部資料，確定繼續嗎？")) {
+  const restoreContext = validation.restoreContext || { channel: "external", source: "external_import", trustExistingHistoricalData: false };
+  const stateValidation = MaterialsQuoteDomain.validateAppStateForImport(bundle.data.state, restoreContext);
+  if (!stateValidation.ok) {
+    setToast(`備份未匯入：${stateValidation.errors[0]}`);
     input.value = "";
     return;
   }
-  await exportDataBackup("before-import");
+  let restoredState;
+  try {
+    restoredState = normalizeAppState(bundle.data.state, restoreContext);
+  } catch (error) {
+    setToast(`備份未匯入：${error instanceof Error ? error.message : "資料遷移失敗"}`);
+    input.value = "";
+    return;
+  }
+  const invalidMaterial = restoredState.materials.find((material) => !MaterialsQuoteDomain.validateMaterialForPersistence(material).ok);
+  if (invalidMaterial) {
+    setToast(`備份中的材料「${invalidMaterial.name || invalidMaterial.id || "未命名"}」含無效公式或價格來源，已取消還原`);
+    input.value = "";
+    return;
+  }
+  let importQuoteError = "";
+  if (validation.channel === "self_backup") {
+    if (MaterialsQuoteDomain.canonicalStringify(restoredState) !== MaterialsQuoteDomain.canonicalStringify(bundle.data.state)) {
+      const mismatch = Object.keys({ ...bundle.data.state, ...restoredState }).sort().find((key) => (
+        MaterialsQuoteDomain.canonicalStringify(restoredState[key]) !== MaterialsQuoteDomain.canonicalStringify(bundle.data.state[key])
+      ));
+      let mismatchDetail = mismatch || "";
+      if (mismatch && Array.isArray(restoredState[mismatch]) && Array.isArray(bundle.data.state[mismatch])) {
+        const index = restoredState[mismatch].findIndex((record, recordIndex) => (
+          MaterialsQuoteDomain.canonicalStringify(record) !== MaterialsQuoteDomain.canonicalStringify(bundle.data.state[mismatch][recordIndex])
+        ));
+        if (index >= 0) {
+          const restoredRecord = restoredState[mismatch][index] || {};
+          const sourceRecord = bundle.data.state[mismatch][index] || {};
+          const field = Object.keys({ ...sourceRecord, ...restoredRecord }).sort().find((key) => (
+            MaterialsQuoteDomain.canonicalStringify(restoredRecord[key]) !== MaterialsQuoteDomain.canonicalStringify(sourceRecord[key])
+          ));
+          mismatchDetail = `${mismatch}[${index}]${field ? `.${field}` : ""}`;
+        }
+      }
+      importQuoteError = `自產備份還原結果與 canonical payload 不一致${mismatchDetail ? `（${mismatchDetail}）` : ""}`;
+    }
+  } else {
+    restoredState.quotes = restoredState.quotes.map((quote) => {
+      if (quoteIsLocked(quote)) return quote;
+      const sanitized = MaterialsQuoteDomain.sanitizeQuoteForPersistence(quote, quote, restoredState.materials, {
+        canEditPricing: true,
+        allowStatusSanitize: true,
+        trustProtectedFields: false,
+        allowVerifiedCatalogMappings: true,
+      });
+      if (sanitized.validationErrors.length && !importQuoteError) importQuoteError = sanitized.validationErrors[0];
+      return normalizeQuoteRecord(sanitized.quote, restoredState.materials);
+    });
+  }
+  if (importQuoteError) {
+    setToast(`備份未匯入：${importQuoteError}`);
+    input.value = "";
+    return;
+  }
+  if (!confirm(`還原會以${validation.channel === "self_backup" ? "已驗證的網站自產備份" : "外部匯入內容"}取代目前瀏覽器內的全部資料，確定繼續嗎？`)) {
+    input.value = "";
+    return;
+  }
+  const storageSnapshot = captureRestoreStorage();
+  const previousState = state;
   const previousUser = currentUser();
-  state = normalizeAppState(bundle.data.state);
-  saveState();
-  saveAccounts(bundle.data.accounts);
-  saveWorkLogs(bundle.data.work_logs);
-  clearAllStoredQuoteDrafts();
-  const restoredUser = previousUser ? loadAccounts().find((account) => account.id === previousUser.id || account.account === previousUser.account) : null;
-  if (restoredUser?.is_active) setAuthSession(restoredUser);
-  else clearAuthSession();
-  logWorkEvent("restore", "還原完整資料備份", { entityType: "settings", detail: `來源檔案：${file.name}` });
+  if (!Array.isArray(bundle.data.accounts) || bundle.data.accounts.some((account) => !ACCOUNT_ROLES.includes(account?.role))) {
+    setToast("備份帳號角色無效，還原已拒絕");
+    input.value = "";
+    return;
+  }
+  const restoredAccounts = bundle.data.accounts.map(normalizeAccountRecord);
+  const accountGuard = validateAccountMutation({
+    actor: previousUser,
+    previousAccounts: loadAccounts(),
+    nextAccounts: restoredAccounts,
+    targetId: previousUser?.id || "",
+  });
+  if (!accountGuard.ok) {
+    setToast("備份包含未授權的帳號或角色變更，還原已拒絕");
+    input.value = "";
+    return;
+  }
+  const restoredUser = previousUser
+    ? restoredAccounts.find((account) => account.id === previousUser.id || account.account === previousUser.account)
+    : null;
+  try {
+    const safetyBundle = await createCurrentBackupBundle();
+    downloadBackupBundle(safetyBundle, "before-import");
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(restoredState));
+    if (!saveAccounts(restoredAccounts, { actor: previousUser, previousAccounts: loadAccounts(), targetId: previousUser?.id || "" })) {
+      throw new Error("ACCOUNT_GUARD_REJECTED");
+    }
+    saveWorkLogs(bundle.data.work_logs);
+    if (bundle.data.bug_reports && typeof BugReportStore !== "undefined") {
+      const restoredBugReports = await BugReportStore.importFromBackup(bundle.data.bug_reports, previousUser);
+      if (!restoredBugReports.ok) throw new Error(restoredBugReports.code);
+    }
+    state = restoredState;
+    if (restoredUser?.is_active) setAuthSession(restoredUser);
+    else clearAuthSession();
+    clearAllStoredQuoteDrafts();
+    logWorkEvent("restore", "還原完整資料備份", { entityType: "settings", detail: `來源檔案：${file.name}` });
+  } catch (error) {
+    state = previousState;
+    try {
+      rollbackRestoreStorage(storageSnapshot);
+    } catch (rollbackError) {
+      console.error(rollbackError);
+    }
+    setToast(`備份還原失敗，原資料已保留：${error instanceof Error ? error.message : "寫入失敗"}`);
+    input.value = "";
+    return;
+  }
   input.value = "";
   go(restoredUser?.is_active ? "/dashboard" : "/login");
   setToast("備份已還原");
@@ -1249,13 +2341,18 @@ window.saveSettings = function (event) {
   event.preventDefault();
   if (!requirePermission("edit_company_settings")) return;
   const form = new FormData(event.currentTarget);
+  const taxValidation = MaterialsQuoteDomain.validateQuoteNumericPolicy({ discount_amount: 0, tax_rate: form.get("defaultTaxRate"), sections: [] });
+  if (!taxValidation.ok) {
+    setToast(taxValidation.errors[0]);
+    return;
+  }
   const before = { ...state.company };
   state.company = {
     ...state.company,
     name: form.get("name"),
     englishName: form.get("englishName"),
     taxId: form.get("taxId"),
-    defaultTaxRate: n(form.get("defaultTaxRate")),
+    defaultTaxRate: Number(form.get("defaultTaxRate")),
     email: form.get("email"),
     phone: form.get("phone"),
     fax: form.get("fax"),
@@ -1455,6 +2552,7 @@ window.addEventListener("beforeunload", (event) => {
 });
 
 function refreshExpiredQuotes() {
+  if (typeof isFrontendReadOnly === "function" && isFrontendReadOnly()) return;
   const today = dateToday();
   const expired = state.quotes.filter((quote) => quote.status === "sent" && quote.valid_until && quote.valid_until < today);
   if (!expired.length) return;

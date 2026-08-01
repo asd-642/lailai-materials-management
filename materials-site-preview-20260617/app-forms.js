@@ -17,9 +17,18 @@ function renderMaterialForm(materialId) {
     wall_thickness_mm: "",
     density_factor: 0.02466,
     formula_version: "legacy-v1",
+    formula_source: "網站既有公式",
+    dimension_unit: "cm",
+    standard_budget_unit_price: "",
+    standard_budget_source: "",
+    standard_budget_version: "",
     cost_price: "",
+    cost_price_status: "unverified",
     price_effective_date: dateToday(),
+    default_actual_unit_price: 0,
     unit_price: 0,
+    actual_price_source: "材料主檔",
+    actual_price_version: "",
     waste_pct: 0,
     labor_unit_price: 0,
     labor_waste_pct: "",
@@ -38,27 +47,27 @@ function renderMaterialForm(materialId) {
         ${unitField(data.unit)}
       </div></section>
       <section class="card"><div class="card-header"><h2>計價方式與規格</h2></div><div class="card-body">
-        <div class="form-grid cols-4">
-          <div class="field span-4"><label>計價類型*</label><select class="select" name="pricing_type">${pricingOptionsHtml(data.pricing_type)}</select><small>${h(opt.hint)} 儲存後會依選擇的計價類型顯示對應說明。</small></div>
-          ${numberField(dimLabel(data.pricing_type, "thickness"), "default_thickness", data.default_thickness, false, "公分")}
-          ${numberField(dimLabel(data.pricing_type, "width"), "default_width", data.default_width, false, "公分")}
-          ${numberField(dimLabel(data.pricing_type, "length"), "default_length", data.default_length, false, "公分")}
-          ${numberField("重量", "default_weight", data.default_weight, false, "公斤 (kg)")}
-          ${numberField("壁厚", "wall_thickness_mm", data.wall_thickness_mm, false, "公釐 (mm)；方管與圓管公式使用")}
+        <div class="form-grid material-pricing-grid">
+          <div class="field"><label>計價類型*</label><select class="select" name="pricing_type">${pricingOptionsHtml(data.pricing_type)}</select><small>${h(opt.hint)} 儲存後會依選擇的計價類型顯示對應說明。</small></div>
           ${numberField("重量換算係數", "density_factor", data.density_factor, false, "管材公式使用；碳鋼預設 0.02466")}
         </div>
       </div></section>
       <section class="card"><div class="card-header"><h2>價格與公式版本</h2></div><div class="card-body form-grid cols-4">
-        ${numberField("成本價", "cost_price", data.cost_price, false, "供應商或內部成本；留空表示尚未建立成本")}
-        ${numberField("報價單價", "unit_price", data.unit_price, true, "帶入報價單的每單位價格")}
-        <div class="field"><label>價格生效日</label><input class="input" type="date" name="price_effective_date" value="${h(data.price_effective_date || "")}"><small>保留價格來源日期</small></div>
-        <div class="field"><label>公式版本</label><input class="input" value="${h(data.formula_version || "legacy-v1")}" disabled><input type="hidden" name="formula_version" value="${h(data.formula_version || "legacy-v1")}"><small>目前沿用既有公式，正式公式確認後再建立新版</small></div>
-        ${numberField("材料損料 %", "waste_pct", data.waste_pct, false, "例:5 表示加 5%,報價時可覆寫")}
+        ${numberField("標準／預算價", "standard_budget_unit_price", data.standard_budget_unit_price, false, "預算比較基準，不等同已確認成本")}
+        ${numberField("案件單價預設值", "unit_price", data.default_actual_unit_price ?? data.unit_price, true, "帶入單一案件後可依權限覆寫")}
+        ${numberField("已確認成本價", "cost_price", data.cost_price, false, "只有人工確認後才納入成本分析")}
+        <div class="field"><label class="checkbox-row"><input type="checkbox" name="cost_verified" ${data.cost_price_status === "verified" ? "checked" : ""}>我已核對此成本價</label><small>未勾選時保留數值，但不納入成本分析</small></div>
+        <div class="field"><label>案件單價版本／生效日*</label><input class="input" type="date" name="price_effective_date" value="${h(data.price_effective_date || "")}" required><small>用作案件單價預設值的可追溯版本</small></div>
+        ${field("標準／預算價來源", "standard_budget_source", data.standard_budget_source, false, "例：公司價目表／工作表儲存格")}
+        ${field("價格來源版本", "standard_budget_version", data.standard_budget_version, false, "例：2026-07-09")}
+        <div class="field"><label>公式版本</label><input class="input" value="${h(data.formula_version || "legacy-v1")}" disabled><input type="hidden" name="formula_version" value="${h(data.formula_version || "legacy-v1")}"><input type="hidden" name="formula_source" value="${h(data.formula_source || "網站既有公式")}"><small>${h(data.formula_source || "網站既有公式")}</small></div>
+        ${numberField("報價損耗加成 %", "waste_pct", data.waste_pct, false, "只調整報價計價量，不代表庫存、裁切配置或可用支數")}
         ${numberField("工錢單價", "labor_unit_price", data.labor_unit_price, false, "每單位的人工費用,0 表示不計工錢")}
         ${numberField("工錢損料 %", "labor_waste_pct", data.labor_waste_pct, false, "留空 = 與材料損料相同")}
         <div class="field span-4"><label>工錢計價方式</label><select class="select" name="labor_pricing_type"><option value="">與材料相同</option>${pricingOptionsHtml(data.labor_pricing_type, true)}</select><small>多數情況留「與材料相同」;例:鋼管材料按 kg、工錢按板才。</small></div>
-        <div class="field span-4"><div class="hint amber">公式版本 <strong>legacy-v1</strong> 代表目前網站既有算法。未經公司正式核算前不自動改寫工程公式；報價寄出時會記錄本次使用的版本與輸入值。</div></div>
+        <div class="field span-4"><div class="hint amber">${data.cost_price_status === "verified" ? "成本價已由管理人員確認。" : "目前成本價尚未驗證，不會納入毛利分析。"} 報價損耗加成只用於估價，不等同實體庫存或裁切結果。</div></div>
       </div></section>
+      ${renderMaterialSpecificationSection(item)}
       <section class="card"><div class="card-header"><h2>其他</h2></div><div class="card-body">
         <div class="field"><label>備註</label><textarea class="textarea" name="notes">${h(data.notes)}</textarea></div>
         <label class="checkbox-row" style="margin-top:12px"><input type="checkbox" name="is_active" ${data.is_active ? "checked" : ""}>啟用 (建報價時可選此材料)</label>
@@ -73,6 +82,65 @@ function renderMaterialForm(materialId) {
 
 function field(label, name, value, required = false, hint = "") {
   return `<div class="field"><label>${h(label)}${required ? "*" : ""}</label><input class="input" name="${h(name)}" value="${h(value)}" ${required ? "required" : ""}>${hint ? `<small>${h(hint)}</small>` : ""}</div>`;
+}
+
+function renderMaterialSpecificationSection(material) {
+  const materialId = material?.id || "";
+  const unit = material?.dimension_unit || "cm";
+  const feedback = ui.materialSpecificationFeedback?.materialId === materialId
+    ? ui.materialSpecificationFeedback
+    : null;
+  if (!materialId) {
+    return `<section class="card material-spec-card" data-material-specifications=""><div class="card-header"><div><h2>厚度、寬度與重量規格</h2><p>建立材料後即可新增多組規格。</p></div></div><div class="card-body"><div class="material-spec-empty">尚未建立材料，儲存後再管理厚度、寬度與重量。</div></div></section>`;
+  }
+  const result = window.MaterialSpecifications?.listSpecifications(materialId);
+  const specifications = result?.ok
+    ? result.value.slice().sort((left, right) => Number(left.thickness) - Number(right.thickness) || Number(left.width) - Number(right.width))
+    : [];
+  const listError = result?.ok ? null : { code: result?.code || "MATERIAL_SPEC_INVALID_STATE", error: result?.error || "無法讀取材料規格" };
+  return `
+    <section class="card material-spec-card" data-material-specifications="${h(materialId)}">
+      <div class="card-header material-spec-head">
+        <div><h2>厚度、寬度與重量規格</h2><p>厚、寬沿用 ${h(unit)}；重量使用公斤（kg）。</p></div>
+        <span class="material-spec-count">${specifications.length} 組</span>
+      </div>
+      <div class="card-body material-spec-body">
+        <div class="material-spec-add" aria-label="新增材料規格">
+          ${materialSpecificationInput("厚度", "thickness", unit, "add")}
+          ${materialSpecificationInput("寬度", "width", unit, "add")}
+          ${materialSpecificationInput("重量", "weight", "kg", "add")}
+          <button class="btn sm" type="button" data-spec-action="add" onclick="addMaterialSpecification('${h(materialId)}')">新增規格</button>
+        </div>
+        ${feedback || listError ? `<div class="material-spec-feedback ${(feedback || listError).ok ? "is-success" : "is-error"}" role="status" data-spec-feedback-code="${h((feedback || listError).code || "OK")}">${h((feedback || listError).error || (feedback || listError).message || "已更新")}</div>` : ""}
+        <div class="material-spec-table" role="table" aria-label="材料厚度寬度重量規格">
+          <div class="material-spec-row material-spec-table-head" role="row"><span>厚度</span><span>寬度</span><span>重量</span><span>操作</span></div>
+          ${specifications.length ? specifications.map((specification) => renderMaterialSpecificationRow(materialId, specification, unit)).join("") : `<div class="material-spec-empty">尚未建立規格</div>`}
+        </div>
+      </div>
+    </section>`;
+}
+
+function materialSpecificationInput(label, fieldName, unit, mode, value = "") {
+  const attr = mode === "edit" ? "data-spec-edit-field" : "data-spec-add-field";
+  return `<label class="material-spec-field"><span>${h(label)} <small>${h(unit)}</small></span><input class="input" type="number" min="0" step="any" ${attr}="${h(fieldName)}" value="${h(value)}"></label>`;
+}
+
+function renderMaterialSpecificationRow(materialId, specification, unit) {
+  const editing = ui.materialSpecificationEditId === specification.id;
+  if (editing) {
+    return `<div class="material-spec-row is-editing" role="row" data-material-spec-edit-row data-specification-id="${h(specification.id)}">
+      ${materialSpecificationInput("厚度", "thickness", unit, "edit", specification.thickness)}
+      ${materialSpecificationInput("寬度", "width", unit, "edit", specification.width)}
+      ${materialSpecificationInput("重量", "weight", "kg", "edit", specification.weight)}
+      <div class="material-spec-actions"><button class="btn sm" type="button" data-spec-action="save-edit" onclick="updateMaterialSpecification('${h(materialId)}','${h(specification.id)}')">儲存</button><button class="btn outline sm" type="button" data-spec-action="cancel-edit" onclick="cancelMaterialSpecificationEdit('${h(materialId)}')">取消</button></div>
+    </div>`;
+  }
+  return `<div class="material-spec-row" role="row" data-material-spec-row data-specification-id="${h(specification.id)}" data-thickness="${h(specification.thickness)}" data-width="${h(specification.width)}" data-weight="${h(specification.weight)}">
+    <span><strong>${h(specification.thickness)}</strong><small>${h(unit)}</small></span>
+    <span><strong>${h(specification.width)}</strong><small>${h(unit)}</small></span>
+    <span><strong>${h(specification.weight)}</strong><small>kg</small></span>
+    <span class="material-spec-actions"><button class="btn outline sm" type="button" data-spec-action="edit" onclick="startMaterialSpecificationEdit('${h(materialId)}','${h(specification.id)}')">編輯</button><button class="btn danger sm" type="button" data-spec-action="delete" onclick="deleteMaterialSpecification('${h(materialId)}','${h(specification.id)}')">刪除</button></span>
+  </div>`;
 }
 
 function unitField(value) {
@@ -115,7 +183,7 @@ function renderCustomers() {
     ["inactive", "未啟用"],
   ];
   return `
-    ${pageHead("客戶", `共 ${rows.length} 位客戶`, `<a class="btn" href="${link("/customers/new")}">＋ 新增客戶</a>`)}
+    ${pageHead("客戶", `共 ${rows.length} 位客戶`, canUseFrontendWrite() ? `<a class="btn" href="${link("/customers/new")}">＋ 新增客戶</a>` : "")}
     <form class="toolbar" onsubmit="searchList(event,'/customers')">
       <input class="input" style="max-width:320px" name="q" value="${h(q)}" placeholder="搜尋名稱、公司、統編、電話…">
       <label class="field-inline">
@@ -346,7 +414,7 @@ function renderQuotes(query) {
     return (!status || quote.status === status) && text.includes(q.toLowerCase());
   });
   return `
-    ${pageHead("報價單", `共 ${rows.length} 張`, `<a class="btn" href="${link("/quotes/new")}">＋ 新增報價單</a>`)}
+    ${pageHead("報價單", `共 ${rows.length} 張`, canUseFrontendWrite() ? `<a class="btn" href="${link("/quotes/new")}">＋ 新增報價單</a>` : "")}
     <form class="toolbar" onsubmit="searchQuotes(event)">
       <input class="input" style="max-width:320px" name="q" value="${h(q)}" placeholder="搜尋報價單號、標題、案名…">
       <select class="select" style="max-width:170px" name="status">
@@ -374,13 +442,30 @@ function renderQuotes(query) {
 
 function ensureQuoteDraft(quoteId) {
   const source = quoteId || "new";
-  if (ui.quoteDraft && ui.quoteDraftSource === source) return ui.quoteDraft;
   const existing = quoteId ? quoteById(quoteId) : null;
+  if (ui.quoteDraft && ui.quoteDraftSource === source) {
+    if (existing) {
+      const reconciliation = MaterialsQuoteDomain.reconcileQuoteDraftApprovalState(ui.quoteDraft, existing);
+      if (reconciliation.changed) {
+        ui.quoteDraft = normalizeQuoteRecord(reconciliation.quote);
+        saveStoredQuoteDraft(false);
+      }
+    }
+    if (typeof window.initializeQuoteLaborDetailsForDraft === "function") {
+      window.initializeQuoteLaborDetailsForDraft();
+    }
+    return ui.quoteDraft;
+  }
   const stored = loadStoredQuoteDraft(source);
   ui.quoteDraftSource = source;
   ui.quoteDraftRestored = Boolean(stored?.draft);
   ui.quoteDraftSavedAt = stored?.saved_at || "";
   ui.quoteDraftDirty = Boolean(stored?.draft);
+  ui.quoteCatalogSelections = stored?.trusted_catalog_selections && typeof stored.trusted_catalog_selections === "object" ? { ...stored.trusted_catalog_selections } : {};
+  ui.quoteCustomSelections = stored?.trusted_custom_selections && typeof stored.trusted_custom_selections === "object" ? { ...stored.trusted_custom_selections } : {};
+  ui.quoteSpecificationSelections = stored?.trusted_specification_selections && typeof stored.trusted_specification_selections === "object" ? { ...stored.trusted_specification_selections } : {};
+  ui.quoteSpecificationDraftSelections = {};
+  ui.quoteLaborDetailFeedback = {};
   ui.quoteDraft = stored?.draft
     ? normalizeQuoteRecord(JSON.parse(JSON.stringify(stored.draft)))
     : existing
@@ -403,10 +488,26 @@ function ensureQuoteDraft(quoteId) {
         discount_amount: 0,
         tax_rate: state.company.defaultTaxRate || 5,
         extra_notes: "",
-        sections: [blankSection()],
-      });
+         sections: [blankSection()],
+       });
+  if (existing) {
+    const reconciliation = MaterialsQuoteDomain.reconcileQuoteDraftApprovalState(ui.quoteDraft, existing);
+    if (reconciliation.changed) {
+      ui.quoteDraft = normalizeQuoteRecord(reconciliation.quote);
+      saveStoredQuoteDraft(false);
+    }
+  }
+  if (stored?.draft && !Object.keys(ui.quoteCatalogSelections).length) {
+    ui.quoteDraft.sections.forEach((section) => section.items.forEach((item) => {
+      const material = materialById(item.material_id);
+      if (MaterialsQuoteDomain.isVerifiedCatalogMapping(item, material)) ui.quoteCatalogSelections[item.line_id] = item.material_id;
+    }));
+  }
   const tpl = templateById(ui.quoteDraft.template_id);
   if (tpl && !quoteId && !stored?.draft) ui.quoteDraft.sections[0].laborItems = JSON.parse(JSON.stringify(tpl.laborItems));
+  if (typeof window.initializeQuoteLaborDetailsForDraft === "function") {
+    window.initializeQuoteLaborDetailsForDraft();
+  }
   if (!existing && !stored?.draft) saveStoredQuoteDraft(false);
   return ui.quoteDraft;
 }

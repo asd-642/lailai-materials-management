@@ -9,13 +9,17 @@ const ACCOUNTS_KEY = "materials_quote_clone_accounts";
 const WORK_LOGS_KEY = "materials_quote_work_logs";
 const LOGIN_ATTEMPTS_KEY = "materials_quote_login_attempts";
 const QUOTE_DRAFT_KEY = "materials_quote_autosave_draft";
-const DATA_SCHEMA_VERSION = 2;
+const DATA_SCHEMA_VERSION = 3;
 const WORK_LOG_LIMIT = 500;
 
 const ACCOUNT_ROLE_LABELS = {
+  owner: "\u8001\u95c6",
   admin: "管理人員",
   staff: "一般人員",
 };
+
+const ACCOUNT_ROLES = Object.freeze(["owner", "admin", "staff", "contractor"]);
+ACCOUNT_ROLE_LABELS.contractor = "\u5916\u5305\u4eba\u54e1";
 
 const ACCOUNT_PERMISSION_GROUPS = [
   {
@@ -83,7 +87,7 @@ const ACCOUNT_PERMISSION_GROUPS = [
       {
         key: "approve_quotes",
         title: "核准並寄出報價",
-        description: "允許核准待審報價、鎖定文件快照並標記為已寄出。",
+        description: "允許核准待核准報價並鎖定文件快照。",
         adminDefault: true,
         staffDefault: false,
       },
@@ -168,13 +172,15 @@ const PRICING_TYPE_OPTIONS = [
 const QUOTE_STATUS_LABEL = {
   draft: "草稿",
   pending_approval: "待核准",
+  approved: "已核准",
+  returned: "已退回",
   sent: "已寄出",
   won: "成交",
   lost: "未成交",
   expired: "已過期",
 };
 
-const QUOTE_LOCKED_STATUSES = ["sent", "won", "lost", "expired"];
+const QUOTE_LOCKED_STATUSES = ["approved", "sent", "won", "lost", "expired"];
 
 const DEFAULT_TERMS = `＊付款方式(匯款)：第一銀行 內壢分行 帳號:280-10-830821 戶名:來來建材有限公司
 ＊本報價單(不含檢驗費)、運費以（拖車能到達之下貨地點，堆高機30公尺範圍以內為準），超出此範圍之費用，另行報價。
@@ -195,6 +201,7 @@ const defaultLaborItems = () => [
 ];
 
 const seedData = () => ({
+  meta: { schema_version: 0 },
   company: {
     name: "來來建材有限公司",
     englishName: "",
@@ -225,7 +232,8 @@ const seedData = () => ({
       default_weight: "",
       wall_thickness_mm: 2,
       density_factor: 0.02466,
-      cost_price: 180,
+      cost_price: "",
+      cost_price_status: "unverified",
       price_effective_date: "2026-07-09",
       unit_price: 180,
       waste_pct: 0,
@@ -249,7 +257,8 @@ const seedData = () => ({
       default_weight: "",
       wall_thickness_mm: "",
       density_factor: 0.02466,
-      cost_price: 15,
+      cost_price: "",
+      cost_price_status: "unverified",
       price_effective_date: "2026-07-09",
       unit_price: 15,
       waste_pct: 0,
@@ -273,7 +282,8 @@ const seedData = () => ({
       default_weight: "",
       wall_thickness_mm: "",
       density_factor: 0.02466,
-      cost_price: 50,
+      cost_price: "",
+      cost_price_status: "unverified",
       price_effective_date: "2026-07-09",
       unit_price: 50,
       waste_pct: 0,
@@ -297,7 +307,8 @@ const seedData = () => ({
       default_weight: "",
       wall_thickness_mm: "",
       density_factor: 0.02466,
-      cost_price: 350,
+      cost_price: "",
+      cost_price_status: "unverified",
       price_effective_date: "2026-07-09",
       unit_price: 350,
       waste_pct: 5,

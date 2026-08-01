@@ -1,8 +1,8 @@
 const SEED_QUOTE_MATERIALS = {
-  m1: { material_id: "m1", name: "不銹鋼管", category: "鋼構", unit: "KG", pricing_type: "steel_rect_tube", formula_version: "excel-1150709-v1", thickness: 3.8, width: 3.8, length: "", wall_thickness_mm: 2, density_factor: 0.02466, quantity: 1, unit_price: 180, cost_price: 180, waste_pct: 0, labor_unit_price: 140, labor_waste_pct: 5, labor_pricing_type: "wood_board_tsai", notes: "" },
-  m2: { material_id: "m2", name: "配件-不鏽鋼扣件", category: "其他配件", unit: "個", pricing_type: "single", formula_version: "excel-1150709-v1", quantity: 1, unit_price: 15, cost_price: 15, waste_pct: 0, labor_unit_price: 0, labor_waste_pct: "", labor_pricing_type: "", notes: "" },
-  m3: { material_id: "m3", name: "配件-不鏽鋼角鐵", category: "其他配件", unit: "個", pricing_type: "single", formula_version: "excel-1150709-v1", quantity: 1, unit_price: 50, cost_price: 50, waste_pct: 0, labor_unit_price: 0, labor_waste_pct: "", labor_pricing_type: "", notes: "" },
-  m4: { material_id: "m4", name: "塑木(中空)-一代", category: "塑木", unit: "才", pricing_type: "wood_board_tsai", formula_version: "excel-1150709-v1", thickness: 2.5, width: 14.6, length: 100, quantity: 1, unit_price: 350, cost_price: 350, waste_pct: 5, labor_unit_price: 140, labor_waste_pct: 5, labor_pricing_type: "", notes: "" },
+  m1: { material_id: "m1", name: "不銹鋼管", category: "鋼構", unit: "KG", pricing_type: "steel_rect_tube", formula_version: "excel-1150709-v1", thickness: 3.8, width: 3.8, length: "", wall_thickness_mm: 2, density_factor: 0.02466, quantity: 1, unit_price: 180, cost_price: "", waste_pct: 0, labor_unit_price: 140, labor_waste_pct: 5, labor_pricing_type: "wood_board_tsai", notes: "" },
+  m2: { material_id: "m2", name: "配件-不鏽鋼扣件", category: "其他配件", unit: "個", pricing_type: "single", formula_version: "excel-1150709-v1", quantity: 1, unit_price: 15, cost_price: "", waste_pct: 0, labor_unit_price: 0, labor_waste_pct: "", labor_pricing_type: "", notes: "" },
+  m3: { material_id: "m3", name: "配件-不鏽鋼角鐵", category: "其他配件", unit: "個", pricing_type: "single", formula_version: "excel-1150709-v1", quantity: 1, unit_price: 50, cost_price: "", waste_pct: 0, labor_unit_price: 0, labor_waste_pct: "", labor_pricing_type: "", notes: "" },
+  m4: { material_id: "m4", name: "塑木(中空)-一代", category: "塑木", unit: "才", pricing_type: "wood_board_tsai", formula_version: "excel-1150709-v1", thickness: 2.5, width: 14.6, length: 100, quantity: 1, unit_price: 350, cost_price: "", waste_pct: 5, labor_unit_price: 140, labor_waste_pct: 5, labor_pricing_type: "", notes: "" },
 };
 
 function itemFromMaterial(materialId, overrides = {}) {
@@ -12,16 +12,38 @@ function itemFromMaterial(materialId, overrides = {}) {
   } catch (error) {
     material = null;
   }
-  if (!material && SEED_QUOTE_MATERIALS[materialId]) return { ...blankItem(), ...SEED_QUOTE_MATERIALS[materialId], ...overrides };
+  if (!material && SEED_QUOTE_MATERIALS[materialId]) {
+    const seeded = SEED_QUOTE_MATERIALS[materialId];
+    return {
+      ...blankItem(),
+      ...seeded,
+      item_kind: "catalog",
+      formula_source: seeded.formula_version === "excel-1150709-v1" ? "公司工作表 1150709" : "網站既有公式",
+      formula_source_id: seeded.formula_version === "excel-1150709-v1" ? "company-workbook/1150709" : `website-formula/${seeded.formula_version}`,
+      formula_source_version: seeded.formula_version,
+      formula_source_snapshot: seeded.formula_version === "excel-1150709-v1" ? "公司工作表 1150709" : "網站既有公式",
+      dimension_unit: "cm",
+      default_actual_unit_price: seeded.unit_price,
+      actual_unit_price: seeded.unit_price,
+      cost_price_status: "unverified_legacy",
+      ...overrides,
+    };
+  }
   if (!material) return { ...blankItem(), ...overrides };
   return {
     ...blankItem(),
+    item_kind: "catalog",
     material_id: material.id,
     name: material.name,
     category: material.category,
     unit: material.unit,
     pricing_type: material.pricing_type,
     formula_version: material.formula_version || "legacy-v1",
+    formula_source: material.formula_source || (material.formula_version === "excel-1150709-v1" ? "公司工作表 1150709" : "網站既有公式"),
+    formula_source_id: material.formula_source_id || (material.formula_version === "excel-1150709-v1" ? "company-workbook/1150709" : `website-formula/${material.formula_version || "legacy-v1"}`),
+    formula_source_version: material.formula_source_version || material.formula_version || "legacy-v1",
+    formula_source_snapshot: material.formula_source_snapshot || material.formula_source || (material.formula_version === "excel-1150709-v1" ? "公司工作表 1150709" : "網站既有公式"),
+    dimension_unit: material.dimension_unit || "cm",
     thickness: material.default_thickness,
     width: material.default_width,
     length: material.default_length,
@@ -29,8 +51,22 @@ function itemFromMaterial(materialId, overrides = {}) {
     wall_thickness_mm: material.wall_thickness_mm,
     density_factor: material.density_factor || 0.02466,
     quantity: 1,
-    unit_price: material.unit_price,
+    standard_budget_unit_price: material.standard_budget_unit_price ?? "",
+    standard_budget_source: material.standard_budget_source || "",
+    standard_budget_version: material.standard_budget_version || "",
+    catalog_sale_unit_price: material.catalog_sale_unit_price ?? "",
+    catalog_sale_price_source: material.catalog_sale_price_source || "",
+    catalog_sale_price_version: material.catalog_sale_price_version || "",
+    catalog_discount_factor: material.catalog_discount_factor ?? "",
+    default_actual_unit_price: material.default_actual_unit_price ?? material.unit_price,
+    actual_unit_price: material.default_actual_unit_price ?? material.unit_price,
+    unit_price: material.default_actual_unit_price ?? material.unit_price,
+    price_source: material.actual_price_source || "材料主檔",
+    price_version: material.actual_price_version || material.price_effective_date || "",
+    price_is_override: false,
+    price_override_reason: "",
     cost_price: material.cost_price ?? "",
+    cost_price_status: material.cost_price_status || "unverified",
     price_effective_date: material.price_effective_date || "",
     waste_pct: material.waste_pct,
     labor_unit_price: material.labor_unit_price,
@@ -43,88 +79,154 @@ function itemFromMaterial(materialId, overrides = {}) {
 
 function blankItem() {
   return {
+    line_id: id("line"),
     material_id: null,
+    item_kind: "custom",
     name: "",
     category: "",
     unit: "件",
     pricing_type: "single",
     formula_version: "legacy-v1",
+    formula_source: "custom-default",
+    formula_source_id: "custom-formula/legacy-v1",
+    formula_source_version: "legacy-v1",
+    formula_source_snapshot: "custom-default",
+    dimension_unit: "cm",
     thickness: "",
     width: "",
     length: "",
+    weight: "",
     wall_thickness_mm: "",
     density_factor: 0.02466,
     quantity: 1,
+    standard_budget_unit_price: "",
+    standard_budget_source: "",
+    standard_budget_version: "",
+    catalog_sale_unit_price: "",
+    catalog_sale_price_source: "",
+    catalog_sale_price_version: "",
+    catalog_discount_factor: "",
+    default_actual_unit_price: 0,
+    actual_unit_price: 0,
     unit_price: 0,
+    price_source: "客製品項",
+    price_version: "",
+    price_is_override: false,
+    price_override_reason: "",
     cost_price: "",
+    cost_price_status: "unverified",
     price_effective_date: "",
     waste_pct: 0,
     labor_unit_price: 0,
     labor_waste_pct: "",
     labor_pricing_type: "",
+    is_chargeable: true,
+    is_required_for_preparation: true,
+    breakdown_adjustment_qty: 0,
+    breakdown_adjustment_reason: "",
+    custom_dimensions_spec: "",
+    detail_drawing_status: "pending",
+    surface_treatment_status: "pending",
+    catalog_review_required: false,
+    catalog_review_reason: "",
     notes: "",
   };
 }
 
 function blankSection() {
   return {
+    calculation_mode: MaterialsQuoteDomain.EXCEL_FORWARD_CALCULATION_MODE,
     name: "",
     area_qty: 1,
     unit: "M²",
     spec: "",
     items: [blankItem()],
     laborItems: defaultLaborItems(),
+    labor_config: {
+      labor_per_board_foot: 140,
+      carpenter_allocation: 1,
+      metalworker_allocation: 0,
+      carpenter_daily_rate: 2500,
+      metalworker_daily_rate: 2000,
+    },
   };
 }
 
-function normalizeQuoteRecord(quote) {
-  const revisionNo = Number.isInteger(Number(quote?.revision_no)) ? Number(quote.revision_no) : 0;
-  const rootId = quote?.revision_group_id || quote?.root_quote_id || quote?.id || "";
+function normalizeQuoteRecord(quote, materialsOverride = null) {
+  let materials = [];
+  if (Array.isArray(materialsOverride)) {
+    materials = materialsOverride;
+  } else {
+    try {
+      materials = Array.isArray(state?.materials) ? state.materials : [];
+    } catch (error) {
+      materials = [];
+    }
+  }
+  const migrated = MaterialsQuoteDomain.migrateQuoteForSchema(quote || {}, materials);
+  const revisionNo = Number.isInteger(Number(migrated?.revision_no)) ? Number(migrated.revision_no) : 0;
+  const rootId = migrated?.revision_group_id || migrated?.root_quote_id || migrated?.id || "";
   return {
-    ...quote,
+    ...migrated,
     revision_no: revisionNo,
+    quote_version: Number.isInteger(Number(migrated?.quote_version)) && Number(migrated.quote_version) > 0
+      ? Number(migrated.quote_version)
+      : revisionNo + 1,
     revision_group_id: rootId,
-    parent_quote_id: quote?.parent_quote_id || "",
-    owner_id: quote?.owner_id || "",
-    project_address: quote?.project_address || "",
-    project_contact: quote?.project_contact || "",
-    next_follow_up: quote?.next_follow_up || "",
-    lost_reason: quote?.lost_reason || "",
-    status_updated_at: quote?.status_updated_at || "",
-    status_updated_by: quote?.status_updated_by || "",
-    sent_at: quote?.sent_at || "",
-    won_at: quote?.won_at || "",
-    lost_at: quote?.lost_at || "",
-    document_snapshot: quote?.document_snapshot || null,
-    is_superseded: Boolean(quote?.is_superseded),
-    superseded_by: quote?.superseded_by || "",
+    parent_quote_id: migrated?.parent_quote_id || "",
+    owner_id: migrated?.owner_id || "",
+    project_address: migrated?.project_address || "",
+    project_contact: migrated?.project_contact || "",
+    next_follow_up: migrated?.next_follow_up || "",
+    lost_reason: migrated?.lost_reason || "",
+    status_updated_at: migrated?.status_updated_at || "",
+    status_updated_by: migrated?.status_updated_by || "",
+    submitted_for_approval_at: migrated?.submitted_for_approval_at || "",
+    submitted_for_approval_by: migrated?.submitted_for_approval_by || null,
+    submitted_for_approval_by_id: migrated?.submitted_for_approval_by_id || migrated?.submitted_for_approval_by?.id || "",
+    submitted_for_approval_role: migrated?.submitted_for_approval_role || migrated?.submitted_for_approval_by?.role || "",
+    submitted_for_approval_version_no: Number.isInteger(Number(migrated?.submitted_for_approval_version_no)) && Number(migrated.submitted_for_approval_version_no) > 0
+      ? Number(migrated.submitted_for_approval_version_no)
+      : null,
+    approval_submission_id: migrated?.approval_submission_id || "",
+    submission_snapshot: migrated?.submission_snapshot || null,
+    submission_snapshot_sha256: migrated?.submission_snapshot_sha256 || "",
+    approved_at: migrated?.approved_at || "",
+    approved_by: migrated?.approved_by || null,
+    approved_version_no: Number.isInteger(Number(migrated?.approved_version_no)) && Number(migrated.approved_version_no) > 0
+      ? Number(migrated.approved_version_no)
+      : null,
+    approval_snapshot_sha256: migrated?.approval_snapshot_sha256 || "",
+    approval_mode: migrated?.approval_mode || "",
+    returned_at: migrated?.returned_at || "",
+    returned_by: migrated?.returned_by || null,
+    returned_reason: migrated?.returned_reason || "",
+    sent_at: migrated?.sent_at || "",
+    won_at: migrated?.won_at || "",
+    lost_at: migrated?.lost_at || "",
+    document_snapshot: migrated?.document_snapshot || null,
+    is_superseded: Boolean(migrated?.is_superseded),
+    superseded_by: migrated?.superseded_by || "",
   };
 }
 
-function normalizeAppState(rawState) {
+function normalizeAppState(rawState, migrationContext = { source: "local", trustExistingHistoricalData: true }) {
   const fallback = seedData();
   const source = rawState && typeof rawState === "object" ? rawState : fallback;
   const company = { ...fallback.company, ...(source.company || {}) };
   if (typeof company.address === "string") company.address = company.address.replace(/^桃園是/, "桃園市");
-  return {
+  const merged = {
     ...fallback,
     ...source,
-    materials: (Array.isArray(source.materials) ? source.materials : fallback.materials).map((material) => ({
-      ...material,
-      formula_version: material.formula_version || "legacy-v1",
-      cost_price: material.cost_price ?? "",
-      price_effective_date: material.price_effective_date || "",
-    })),
+    materials: Array.isArray(source.materials) ? source.materials : fallback.materials,
     customers: Array.isArray(source.customers) ? source.customers : fallback.customers,
     templates: Array.isArray(source.templates) ? source.templates : fallback.templates,
-    quotes: (Array.isArray(source.quotes) ? source.quotes : fallback.quotes).map(normalizeQuoteRecord),
+    quotes: Array.isArray(source.quotes) ? source.quotes : fallback.quotes,
     company,
-    meta: {
-      ...(source.meta || {}),
-      schema_version: DATA_SCHEMA_VERSION,
-      migrated_at: source.meta?.schema_version === DATA_SCHEMA_VERSION ? source.meta?.migrated_at || "" : new Date().toISOString(),
-    },
   };
+  const migrated = MaterialsQuoteDomain.migrateAppState(merged, DATA_SCHEMA_VERSION, new Date().toISOString(), migrationContext);
+  migrated.quotes = migrated.quotes.map((quote) => normalizeQuoteRecord(quote, migrated.materials));
+  return migrated;
 }
 
 let state = loadState();
@@ -143,7 +245,14 @@ let ui = {
   quoteDraftRestored: false,
   quoteDraftSavedAt: "",
   quoteDraftDirty: false,
+  quoteCatalogSelections: {},
+  quoteCustomSelections: {},
+  quoteSpecificationSelections: {},
+  quoteSpecificationDraftSelections: {},
+  quoteLaborDetailFeedback: {},
   editingMaterial: null,
+  materialSpecificationEditId: null,
+  materialSpecificationFeedback: null,
   toast: "",
 };
 
@@ -164,6 +273,12 @@ function loadState() {
 }
 
 function saveState() {
+  try {
+    const sessionUser = JSON.parse(localStorage.getItem(AUTH_USER_KEY) || "null");
+    if (sessionUser && normalizeAccountRole(sessionUser.role) === "contractor") return false;
+  } catch (error) {
+    return false;
+  }
   state.meta = { ...(state.meta || {}), schema_version: DATA_SCHEMA_VERSION, updated_at: new Date().toISOString() };
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -207,9 +322,11 @@ function defaultAccounts() {
 }
 
 function defaultAccountPermissions(role) {
-  const adminRole = normalizeAccountRole(role) === "admin";
+  const normalizedRole = normalizeAccountRole(role);
+  const adminRole = ["owner", "admin"].includes(normalizedRole);
+  const contractorRole = normalizedRole === "contractor";
   return ACCOUNT_PERMISSION_DEFINITIONS.reduce((permissions, item) => {
-    permissions[item.key] = adminRole ? item.adminDefault !== false : Boolean(item.staffDefault);
+    permissions[item.key] = contractorRole ? false : adminRole ? item.adminDefault !== false : Boolean(item.staffDefault);
     return permissions;
   }, {});
 }
@@ -271,7 +388,44 @@ function canDeleteCollection(collection) {
 }
 
 function normalizeAccountRole(role) {
-  return role === "admin" ? "admin" : "staff";
+  return ACCOUNT_ROLES.includes(role) ? role : "staff";
+}
+
+function activeOwnerCount(accounts) {
+  return (Array.isArray(accounts) ? accounts : []).filter((account) => normalizeAccountRole(account?.role) === "owner" && account?.is_active !== false).length;
+}
+
+function validateAccountMutation({ actor, previousAccounts = [], nextAccounts = [], targetId = "", bootstrapConfirmed = false } = {}) {
+  const previous = Array.isArray(previousAccounts) ? previousAccounts : [];
+  const next = Array.isArray(nextAccounts) ? nextAccounts : [];
+  if (next.some((account) => !ACCOUNT_ROLES.includes(account?.role))) return { ok: false, code: "UNKNOWN_ROLE" };
+  if (activeOwnerCount(next) < 1 && activeOwnerCount(previous) > 0) return { ok: false, code: "LAST_OWNER_PROTECTED" };
+  const actorRole = normalizeAccountRole(actor?.role);
+  const actorRecord = previous.find((account) => account.id === actor?.id && account.is_active !== false);
+  if (!actorRecord || normalizeAccountRole(actorRecord.role) !== actorRole) return { ok: false, code: "ACTOR_NOT_CURRENT_ACTIVE_ACCOUNT" };
+  const targetBefore = previous.find((account) => account.id === targetId);
+  const targetAfter = next.find((account) => account.id === targetId);
+  const ownerWasAbsent = activeOwnerCount(previous) === 0;
+  const ownerWasCreated = targetAfter?.role === "owner" && targetBefore?.role !== "owner";
+  if (ownerWasCreated && ownerWasAbsent) {
+    if (!(targetBefore && actorRole === "admin" && bootstrapConfirmed && targetAfter?.is_active !== false)) {
+      return { ok: false, code: "OWNER_BOOTSTRAP_REQUIRED" };
+    }
+  }
+  if (ownerWasCreated && !ownerWasAbsent && actorRole !== "owner") {
+    return { ok: false, code: "OWNER_PROTECTED" };
+  }
+  if (targetBefore?.role === "owner" && actorRole !== "owner") return { ok: false, code: "OWNER_PROTECTED" };
+  if (actorRole !== "owner" && actorRole !== "admin") return { ok: false, code: "ACCOUNT_MANAGEMENT_DENIED" };
+  return { ok: true, code: "" };
+}
+
+function validateAccountSetForImport(accounts, actor) {
+  const records = Array.isArray(accounts) ? accounts.map(normalizeAccountRecord) : [];
+  if (!records.length || records.some((account) => !account.account || !ACCOUNT_ROLES.includes(account.role))) {
+    return { ok: false, code: "ACCOUNT_IMPORT_INVALID" };
+  }
+  return validateAccountMutation({ actor, previousAccounts: loadAccounts(), nextAccounts: records, targetId: actor?.id || "" });
 }
 
 function accountRoleLabel(role) {
@@ -377,13 +531,34 @@ function loadAccounts() {
   return accounts;
 }
 
-function saveAccounts(accounts) {
+function saveAccounts(accounts, options = {}) {
+  if (!options.allowReadOnlyMigration) {
+    try {
+      const sessionUser = JSON.parse(localStorage.getItem(AUTH_USER_KEY) || "null");
+      if (sessionUser && normalizeAccountRole(sessionUser.role) === "contractor") return false;
+    } catch (error) {
+      return false;
+    }
+  }
   const records = accounts.map(normalizeAccountRecord).map((account) => {
     const record = { ...account };
     if (record.password_hash) delete record.password;
     return record;
   });
+  if (records.some((account) => !ACCOUNT_ROLES.includes(account.role))) return false;
+  if (options.actor) {
+    const previous = Array.isArray(options.previousAccounts) ? options.previousAccounts : loadAccounts();
+    const guard = validateAccountMutation({
+      actor: options.actor,
+      previousAccounts: previous,
+      nextAccounts: records,
+      targetId: options.targetId || options.actor.id,
+      bootstrapConfirmed: options.bootstrapConfirmed === true,
+    });
+    if (!guard.ok) return false;
+  }
   localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(records));
+  return true;
 }
 
 function accountById(accountId) {
@@ -413,6 +588,33 @@ function currentUser() {
   clearAuthSession();
   return null;
 }
+
+window.MaterialSpecifications = MaterialsQuoteDomain.createMaterialSpecificationStore({
+  getState: () => state,
+  setState: (nextState) => { state = nextState; },
+  saveState: () => saveState(),
+  getActor: () => {
+    const actor = currentUser();
+    return actor && hasAccountPermission(actor, "edit_material_prices") ? actor : null;
+  },
+});
+
+window.QuoteMaterialSpecifications = MaterialsQuoteDomain.createQuoteMaterialSpecificationStore({
+  getDraft: () => ui.quoteDraft,
+  setDraft: (nextDraft) => { ui.quoteDraft = nextDraft; },
+  saveDraft: () => saveStoredQuoteDraft(),
+  getActor: () => currentUser(),
+  canWriteQuote: (actor) => Boolean(actor
+    && actor.is_active !== false
+    && ["owner", "admin", "staff"].includes(String(actor.role || ""))),
+  getWeight: (materialId, thickness, width) => window.MaterialSpecifications.getWeight(materialId, thickness, width),
+  now: () => new Date().toISOString(),
+  getTrustedSelection: (lineId) => ui.quoteSpecificationSelections[lineId] || null,
+  setTrustedSelection: (lineId, snapshot) => {
+    if (snapshot) ui.quoteSpecificationSelections[lineId] = MaterialsQuoteDomain.deepClone(snapshot);
+    else delete ui.quoteSpecificationSelections[lineId];
+  },
+});
 
 function isAdmin() {
   return currentUser()?.role === "admin";
@@ -553,6 +755,9 @@ function saveStoredQuoteDraft(markDirty = true) {
       source,
       saved_at: savedAt,
       draft: ui.quoteDraft,
+      trusted_catalog_selections: ui.quoteCatalogSelections,
+      trusted_custom_selections: ui.quoteCustomSelections,
+      trusted_specification_selections: ui.quoteSpecificationSelections,
     }));
     ui.quoteDraftSavedAt = savedAt;
     if (markDirty) ui.quoteDraftDirty = true;
@@ -575,6 +780,10 @@ function clearStoredQuoteDraft(source) {
   ui.quoteDraftSavedAt = "";
   ui.quoteDraftRestored = false;
   ui.quoteDraftDirty = false;
+  ui.quoteCatalogSelections = {};
+  ui.quoteCustomSelections = {};
+  ui.quoteSpecificationSelections = {};
+  ui.quoteLaborDetailFeedback = {};
 }
 
 function clearAllStoredQuoteDrafts() {
@@ -582,6 +791,10 @@ function clearAllStoredQuoteDrafts() {
   ui.quoteDraftSavedAt = "";
   ui.quoteDraftRestored = false;
   ui.quoteDraftDirty = false;
+  ui.quoteCatalogSelections = {};
+  ui.quoteCustomSelections = {};
+  ui.quoteSpecificationSelections = {};
+  ui.quoteLaborDetailFeedback = {};
 }
 
 function id(prefix) {
@@ -651,30 +864,71 @@ function computePriceableQty(item, pricingType = item.pricing_type) {
 }
 
 function computeItem(item) {
-  const baseQty = computePriceableQty(item);
-  const wasteQty = baseQty * (n(item.waste_pct) / 100);
-  const priceableQty = baseQty + wasteQty;
-  const materialSubtotal = priceableQty * n(item.unit_price);
-  const hasCostPrice = item.cost_price !== "" && item.cost_price != null;
+  let baseQty = 0;
+  let formulaError = "";
+  let formulaTrace = {
+    pricing_type: item.pricing_type || "single",
+    formula_version: item.formula_version || "legacy-v1",
+    formula_source: item.formula_source || "",
+    input_unit: item.dimension_unit || "",
+    normalized_unit: "cm",
+    dimensions_cm: { thickness: null, width: null, length: null },
+  };
+  try {
+    baseQty = computePriceableQty(item);
+    formulaTrace = MaterialsQuoteDomain.buildFormulaTrace(item);
+  } catch (error) {
+    formulaError = error instanceof Error ? error.message : "公式或尺寸單位無效";
+  }
+  let wastePolicy = { base_qty: baseQty, quote_waste_qty: 0, priceable_qty: baseQty, affects_inventory: false, affects_cut_plan: false };
+  try {
+    wastePolicy = MaterialsQuoteDomain.applyQuoteWasteMarkup(baseQty, item.waste_pct);
+  } catch (error) {
+    formulaError = error instanceof Error ? error.message : "報價損耗加成無效";
+  }
+  const wasteQty = wastePolicy.quote_waste_qty;
+  const priceableQty = wastePolicy.priceable_qty;
+  const actualUnitPrice = item.actual_unit_price ?? item.unit_price;
+  const rawMaterialSubtotal = priceableQty * n(actualUnitPrice);
+  const chargeable = item.is_chargeable !== false;
+  const materialSubtotal = chargeable ? rawMaterialSubtotal : 0;
+  const hasCostPrice = item.cost_price_status === "verified" && item.cost_price !== "" && item.cost_price != null;
   const materialCostSubtotal = hasCostPrice ? priceableQty * n(item.cost_price) : 0;
   const laborPricing = item.labor_pricing_type || item.pricing_type;
-  const laborBaseQty = computePriceableQty(item, laborPricing);
-  const laborWastePct = item.labor_waste_pct === "" || item.labor_waste_pct == null ? n(item.waste_pct) : n(item.labor_waste_pct);
-  const laborPricedQty = laborBaseQty + laborBaseQty * (laborWastePct / 100);
-  const laborSubtotal = laborPricedQty * n(item.labor_unit_price);
+  let laborBaseQty = 0;
+  try {
+    laborBaseQty = formulaError ? 0 : computePriceableQty(item, laborPricing);
+  } catch (error) {
+    formulaError = error instanceof Error ? error.message : "工錢公式無效";
+  }
+  const laborWastePct = item.labor_waste_pct === "" || item.labor_waste_pct == null ? item.waste_pct : item.labor_waste_pct;
+  let laborPricedQty = laborBaseQty;
+  try {
+    laborPricedQty = MaterialsQuoteDomain.applyQuoteWasteMarkup(laborBaseQty, laborWastePct).priceable_qty;
+  } catch (error) {
+    formulaError = error instanceof Error ? error.message : "工錢損耗無效";
+  }
+  const rawLaborSubtotal = laborPricedQty * n(item.labor_unit_price);
+  const laborSubtotal = chargeable ? rawLaborSubtotal : 0;
   return {
-    ok: Boolean(item.name && item.unit),
+    ok: Boolean(item.name && item.unit && !formulaError),
     baseQty,
     wasteQty,
     priceableQty,
+    formulaTrace,
+    actualUnitPrice,
+    chargeable,
+    requiredForPreparation: item.is_required_for_preparation !== false,
+    rawMaterialSubtotal,
     materialSubtotal,
     hasCostPrice,
     materialCostSubtotal,
     materialGrossProfit: hasCostPrice ? materialSubtotal - materialCostSubtotal : null,
     laborPricedQty,
+    rawLaborSubtotal,
     laborSubtotal,
     subtotal: materialSubtotal + laborSubtotal,
-    message: item.name ? "資料不全" : "請填寫品名",
+    message: formulaError || (item.name ? "資料不全" : "請填寫品名"),
   };
 }
 
@@ -699,6 +953,9 @@ function computeLaborDistribution(laborItems, laborTotal) {
 }
 
 function computeSection(section) {
+  if (section?.calculation_mode === MaterialsQuoteDomain.EXCEL_FORWARD_CALCULATION_MODE) {
+    return MaterialsQuoteDomain.calculateExcelQuoteSection(section);
+  }
   const itemsComputed = section.items.map(computeItem);
   const materialSubtotal = itemsComputed.reduce((sum, item) => sum + item.materialSubtotal, 0);
   const laborSubtotal = itemsComputed.reduce((sum, item) => sum + item.laborSubtotal, 0);
@@ -711,7 +968,7 @@ function computeSection(section) {
 }
 
 function computeQuote(quote) {
-  if (quote.manualTotal && !ui.quoteDraft) {
+  if (quote.legacy_manual_total && quote.manualTotal) {
     const sections = quote.sections.map(computeSection);
     const materialCost = sections.reduce((sum, section) => sum + section.materialCostSubtotal * n(section.area_qty || 1), 0);
     return {
@@ -728,7 +985,8 @@ function computeQuote(quote) {
   const subtotalBeforeDiscount = sections.reduce((sum, section) => sum + section.sectionTotal, 0);
   const discount = n(quote.discount_amount);
   const taxable = Math.max(0, subtotalBeforeDiscount - discount);
-  const tax = taxable * (n(quote.tax_rate) / 100);
+  const usesExcelForward = sections.some((section) => section.calculationMode === MaterialsQuoteDomain.EXCEL_FORWARD_CALCULATION_MODE);
+  const tax = usesExcelForward ? Math.round(taxable * (n(quote.tax_rate) / 100)) : taxable * (n(quote.tax_rate) / 100);
   const materialCost = sections.reduce((sum, section) => sum + section.materialCostSubtotal * n(section.area_qty || 1), 0);
   const hasCompleteCostData = sections.length > 0 && sections.every((section) => section.hasCompleteCostData);
   const grossProfit = hasCompleteCostData ? taxable - materialCost : null;
@@ -736,7 +994,7 @@ function computeQuote(quote) {
   return { sections, subtotal: subtotalBeforeDiscount, discount, tax, total: taxable + tax, materialCost, hasCompleteCostData, grossProfit, grossMarginPct };
 }
 
-function createQuoteDocumentSnapshot(quote, totals = computeQuote(quote)) {
+function createQuoteDocumentSnapshot(quote, totals = computeQuote(quote), options = {}) {
   const snapshotQuote = { ...quote, document_snapshot: null };
   return MaterialsQuoteDomain.createQuoteSnapshot({
     quote: snapshotQuote,
@@ -744,15 +1002,15 @@ function createQuoteDocumentSnapshot(quote, totals = computeQuote(quote)) {
     template: templateById(quote.template_id) || {},
     company: state.company || {},
     totals,
-    issuedAt: new Date().toISOString(),
-    issuedBy: currentUser() ? { id: currentUser().id, name: currentUser().name, account: currentUser().account } : null,
+    issuedAt: options.issuedAt || new Date().toISOString(),
+    issuedBy: options.issuedBy || (currentUser() ? { id: currentUser().id, name: currentUser().name, account: currentUser().account } : null),
   });
 }
 
 function quoteDocumentContext(quote) {
   const snapshot = quote?.document_snapshot;
   if (snapshot?.schema === "quote-document-snapshot/v1") {
-    const frozenQuote = normalizeQuoteRecord(MaterialsQuoteDomain.deepClone(snapshot.quote));
+    const frozenQuote = normalizeQuoteRecord(MaterialsQuoteDomain.deepClone(snapshot.quote), []);
     return {
       quote: {
         ...frozenQuote,
@@ -763,6 +1021,15 @@ function quoteDocumentContext(quote) {
         lost_reason: quote.lost_reason,
         status_updated_at: quote.status_updated_at,
         status_updated_by: quote.status_updated_by,
+        submitted_for_approval_at: quote.submitted_for_approval_at,
+        submitted_for_approval_by: quote.submitted_for_approval_by,
+        approved_at: quote.approved_at,
+        approved_by: quote.approved_by,
+        approved_version_no: quote.approved_version_no,
+        approval_snapshot_sha256: quote.approval_snapshot_sha256,
+        returned_at: quote.returned_at,
+        returned_by: quote.returned_by,
+        returned_reason: quote.returned_reason,
         sent_at: quote.sent_at,
         won_at: quote.won_at,
         lost_at: quote.lost_at,

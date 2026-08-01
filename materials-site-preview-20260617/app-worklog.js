@@ -29,7 +29,8 @@ const WORK_LOG_ENTITY_LABELS = {
 };
 
 function canViewWorkLogs() {
-  return isAdmin();
+  const role = window.FrontendAccess?.role?.() || "unknown";
+  return role === "owner" || role === "admin";
 }
 
 function formatWorkLogTime(date = new Date()) {
@@ -41,7 +42,7 @@ function loadWorkLogs() {
   try {
     const saved = localStorage.getItem(WORK_LOGS_KEY);
     const logs = saved ? JSON.parse(saved) : [];
-    return Array.isArray(logs) ? logs : [];
+    return Array.isArray(logs) ? logs.map((entry) => window.AuthEventContract?.canonicalAuthEvent(entry) || entry) : [];
   } catch (error) {
     console.warn(error);
     return [];
@@ -49,7 +50,8 @@ function loadWorkLogs() {
 }
 
 function saveWorkLogs(logs) {
-  localStorage.setItem(WORK_LOGS_KEY, JSON.stringify(logs.slice(0, WORK_LOG_LIMIT)));
+  const normalized = logs.map((entry) => window.AuthEventContract?.canonicalAuthEvent(entry) || entry);
+  localStorage.setItem(WORK_LOGS_KEY, JSON.stringify(normalized.slice(0, WORK_LOG_LIMIT)));
 }
 
 function workLogActor(account = currentUser()) {

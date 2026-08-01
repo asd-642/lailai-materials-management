@@ -1,6 +1,6 @@
 (function () {
-  const VERSION = "company-materials-1150709-v2";
-  const MARKER = "materials_company_catalog_1150709_v2";
+  const VERSION = "company-materials-1150709-v3";
+  const MARKER = "materials_company_catalog_1150709_v3";
   const STORAGE = "materials_quote_clone_state";
   const PRICE_DATE = "2026-07-09";
   const SOURCE = "1150709(沈姊)大維工程-塑木欄杆工程.xlsx／單價分析表(部位隱藏C欄)";
@@ -93,6 +93,27 @@
     return result;
   }
 
+  function preservedMaterialSpecificationFields(existing) {
+    const fields = {};
+    if (Object.prototype.hasOwnProperty.call(existing, "material_specifications_schema")) {
+      fields.material_specifications_schema = existing.material_specifications_schema;
+    }
+    if (Object.prototype.hasOwnProperty.call(existing, "material_specifications_origin")) {
+      fields.material_specifications_origin = existing.material_specifications_origin;
+    }
+    if (Object.prototype.hasOwnProperty.call(existing, "specifications")) {
+      fields.specifications = existing.specifications;
+    }
+    return fields;
+  }
+
+  function normalizeMaterialSpecifications(material) {
+    const domain = window.MaterialsQuoteDomain;
+    return typeof domain?.migrateMaterialSpecifications === "function"
+      ? domain.migrateMaterialSpecifications(material)
+      : material;
+  }
+
   function materialFromRow(row, existing = {}) {
     const [sourceRow, fixedId, name, category, unit, budgetPrice, salePrice] = row;
     const id = fixedId || `company-1150709-ah-${String(sourceRow).padStart(3, "0")}`;
@@ -104,8 +125,13 @@
     const sourceNote = `來源：${SOURCE}!AH${sourceRow}:AL${sourceRow}。`;
     const statusNote = hasPrice ? "" : "原表未提供售價，已先停用。";
     const laborNote = isLaborOnly ? "售價匯入工錢單價。" : (isBoardFoot || isSteel ? "Excel 工資基數：每才 140 元。" : "");
+    const existingCost = existing.cost_price ?? "";
+    const existingCostStatus = existing.cost_price_status || (existingCost !== "" && existingCost != null
+      ? existing.source_import ? "unverified_legacy_budget_import" : "unverified_legacy"
+      : "unverified");
 
     return {
+      ...preservedMaterialSpecificationFields(existing),
       id,
       name,
       code: existing.code || "",
@@ -119,9 +145,25 @@
       wall_thickness_mm: existing.wall_thickness_mm || (type === "steel_rect_tube" || type === "steel_round_tube" ? 2 : ""),
       density_factor: existing.density_factor || 0.02466,
       formula_version: "excel-1150709-v1",
-      cost_price: Number.isFinite(budgetPrice) ? budgetPrice : "",
+      formula_source: SOURCE,
+      formula_source_id: "company-workbook/1150709",
+      formula_source_version: "excel-1150709-v1",
+      formula_source_snapshot: SOURCE,
+      dimension_unit: existing.dimension_unit || "cm",
+      standard_budget_unit_price: Number.isFinite(budgetPrice) ? budgetPrice : "",
+      standard_budget_source: `${SOURCE}!AH${sourceRow}:AL${sourceRow}`,
+      standard_budget_version: VERSION,
+      catalog_sale_unit_price: isLaborOnly ? "" : (hasPrice ? salePrice : ""),
+      catalog_sale_price_source: `${SOURCE}!AL${sourceRow}`,
+      catalog_sale_price_version: VERSION,
+      catalog_discount_factor: Number.isFinite(budgetPrice) && budgetPrice !== 0 && hasPrice ? salePrice / budgetPrice : "",
+      cost_price: existingCost,
+      cost_price_status: existingCostStatus,
       price_effective_date: PRICE_DATE,
+      default_actual_unit_price: isLaborOnly ? 0 : (hasPrice ? salePrice : 0),
       unit_price: isLaborOnly ? 0 : (hasPrice ? salePrice : 0),
+      actual_price_source: `${SOURCE}!AL${sourceRow}`,
+      actual_price_version: PRICE_DATE,
       waste_pct: isBoardFoot ? 5 : 0,
       labor_unit_price: isLaborOnly ? (hasPrice ? salePrice : 0) : (isBoardFoot || isSteel ? 140 : 0),
       labor_waste_pct: isBoardFoot || isSteel ? 5 : "",
@@ -170,9 +212,25 @@
       wall_thickness_mm: existing.wall_thickness_mm || "",
       density_factor: existing.density_factor || 0.02466,
       formula_version: existing.formula_version || "excel-1150709-v1",
+      formula_source: existing.formula_source || PROFILE_SOURCE,
+      formula_source_id: existing.formula_source_id || "company-workbook/1150709",
+      formula_source_version: existing.formula_source_version || existing.formula_version || "excel-1150709-v1",
+      formula_source_snapshot: existing.formula_source_snapshot || existing.formula_source || PROFILE_SOURCE,
+      dimension_unit: existing.dimension_unit || "cm",
+      standard_budget_unit_price: existing.standard_budget_unit_price ?? "",
+      standard_budget_source: existing.standard_budget_source || "",
+      standard_budget_version: existing.standard_budget_version || "",
+      catalog_sale_unit_price: existing.catalog_sale_unit_price ?? existing.default_actual_unit_price ?? existing.unit_price ?? "",
+      catalog_sale_price_source: existing.catalog_sale_price_source || existing.actual_price_source || "",
+      catalog_sale_price_version: existing.catalog_sale_price_version || existing.actual_price_version || "",
+      catalog_discount_factor: existing.catalog_discount_factor ?? "",
       cost_price: existing.cost_price ?? "",
+      cost_price_status: existing.cost_price_status || "unverified",
       price_effective_date: existing.price_effective_date || "",
+      default_actual_unit_price: hasMaterialPrice ? Number(existing.default_actual_unit_price ?? existing.unit_price) : 0,
       unit_price: hasMaterialPrice ? Number(existing.unit_price) : 0,
+      actual_price_source: existing.actual_price_source || PROFILE_SOURCE,
+      actual_price_version: existing.actual_price_version || existing.price_effective_date || "",
       waste_pct: existing.waste_pct ?? 5,
       labor_unit_price: Number(existing.labor_unit_price) || 140,
       labor_waste_pct: existing.labor_waste_pct === "" || existing.labor_waste_pct == null ? 5 : existing.labor_waste_pct,
@@ -237,7 +295,7 @@
     const imported = Array.from(importedById.values());
     const untouched = data.materials.filter((item) => !expectedIds.has(item.id));
     const importedCount = imported.filter((item) => !existingById.has(item.id)).length;
-    data.materials = [...imported, ...untouched];
+    data.materials = [...imported, ...untouched].map(normalizeMaterialSpecifications);
     saveData(data);
 
     const stamp = new Date().toISOString();

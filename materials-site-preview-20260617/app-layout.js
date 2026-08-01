@@ -1,4 +1,5 @@
 function render() {
+  if (typeof cleanupBugReportObjectUrls === "function") cleanupBugReportObjectUrls();
   const app = document.getElementById("app");
   const r = route();
   const printRoute = r.parts[0] === "quotes" && r.parts[2] === "print";
@@ -52,6 +53,7 @@ function renderShell(content, path) {
     ["/customers", "◇", "客戶"],
     ["/quote-templates", "☰", "報價單版本"],
     ["/quotes", "≡", "報價單"],
+    ["/approval-center", "✓", "審核中心"],
   ];
   if (canManageAccounts()) {
     nav.push(["/accounts", "◎", "帳號管理"]);
@@ -84,6 +86,7 @@ function renderShell(content, path) {
             ui.accountOpen
               ? `<div class="account-menu">
                   <a href="${link("/settings/profile")}">個人設定</a>
+                  <button type="button" data-bug-report-entry onclick="openBugReportPage()">Bug 回報</button>
                   ${canManageAccounts() ? `<button onclick="resetDemo()">重置示範資料</button>` : ""}
                   <button onclick="logout()">登出</button>
                 </div>`
@@ -95,7 +98,7 @@ function renderShell(content, path) {
           </button>
         </div>
       </aside>
-      <main class="main">${content}</main>
+      <main class="main">${renderFrontendReadOnlyBanner()}${content}</main>
     </div>
   `;
 }
@@ -109,8 +112,8 @@ function renderPage(r) {
     return renderMaterials();
   }
   if (first === "customers") {
-    if (second === "new") return renderCustomerForm(null);
-    if (second) return renderCustomerForm(second);
+    if (second === "new") return canUseFrontendWrite() ? renderCustomerForm(null) : renderReadonlyRouteDenied("新增客戶需要寫入權限");
+    if (second) return canUseFrontendWrite() ? renderCustomerForm(second) : renderReadonlyRouteDenied("編輯客戶需要寫入權限");
     return renderCustomers();
   }
   if (first === "quote-templates") {
@@ -119,11 +122,13 @@ function renderPage(r) {
     return renderTemplates();
   }
   if (first === "quotes") {
-    if (second === "new") return renderQuoteForm(null);
-    if (third === "edit") return renderQuoteForm(second);
+    if (second === "new") return canUseFrontendWrite() ? renderQuoteForm(null) : renderReadonlyRouteDenied("新增報價單需要寫入權限");
+    if (third === "edit") return canUseFrontendWrite() ? renderQuoteForm(second) : renderReadonlyRouteDenied("編輯報價單需要寫入權限");
     if (second) return renderQuoteDetail(second);
     return renderQuotes(r.query);
   }
+  if (first === "approval-center") return renderApprovalCenter();
+  if (first === "bug-reports") return renderBugReports();
   if (first === "accounts") return canManageAccounts() ? renderAccounts() : renderAccessDenied();
   if (first === "work-logs") return canViewWorkLogs() ? renderWorkLogs(r.query) : renderAccessDenied();
   if (first === "settings") {
@@ -161,7 +166,7 @@ function renderDashboard() {
     ${pageHead("儀表板", `歡迎回來，${currentUser()?.name || "使用者"}`)}
     <h2 style="font-size:18px;margin:0 0 12px">今日待辦</h2>
     <div class="grid cards-4 dashboard-actions">
-      ${dashboardAction("待主管核准", pendingApproval.length, "/quotes?status=pending_approval", pendingApproval.length ? "需要確認內容與價格" : "目前沒有待審報價")}
+      ${dashboardAction("待主管核准", pendingApproval.length, "/quotes?status=pending_approval", pendingApproval.length ? "需要確認內容與價格" : "目前沒有待核准報價")}
       ${dashboardAction("到期追蹤", dueFollowUps.length, "/quotes", dueFollowUps.length ? "已到下次追蹤日" : "今日沒有逾期追蹤")}
       ${dashboardAction("即將到期", expiringSoon.length, "/quotes?status=sent", "未來 7 天內到期")}
       ${dashboardAction("未審核客戶", unreviewedCustomers.length, "/customers?customer_filter=unreviewed", "完成名片資料確認")}
@@ -294,8 +299,8 @@ function renderMaterials() {
     </form>
     ${renderMaterialFilterChips({ selectedCategories, selectedPriceBases, minPrice, maxPrice, sort, q, includeInactive })}
     <div class="table-wrap">
-      <table>
-        <thead><tr><th>名稱</th><th>分類</th><th>規格 (厚×寬×長)</th><th>計價 / 公式</th><th>成本 / 報價</th><th>材料毛利</th><th>工錢單價</th><th>損料</th><th>狀態</th></tr></thead>
+      <table class="materials-table">
+        <thead><tr><th>名稱</th><th>分類</th><th>計價 / 公式</th><th>成本 / 報價</th><th>材料毛利</th><th>工錢單價</th><th>損料</th><th>狀態</th></tr></thead>
         <tbody>
           ${
             rows.length
@@ -304,7 +309,6 @@ function renderMaterials() {
                     (item) => `<tr>
                 <td>${canEdit ? `<a class="link-strong" href="${link(`/materials/${item.id}`)}">${h(item.name)}</a>` : `<strong>${h(item.name)}</strong>`}${item.code ? `<div class="sub">#${h(item.code)}</div>` : ""}</td>
                 <td>${h(item.category || "—")}</td>
-                <td>${materialSpec(item)}</td>
                 <td>${h(pricingLabel(item.pricing_type, true))}<div class="sub">${h(item.formula_version || "legacy-v1")} / ${h(item.unit)}</div></td>
                 <td>${item.cost_price === "" || item.cost_price == null ? `<span class="muted">未建成本</span>` : money(item.cost_price)}<div class="sub">報價 ${money(item.unit_price)}</div></td>
                 <td>${item.cost_price === "" || item.cost_price == null || !n(item.unit_price) ? "—" : `${(((n(item.unit_price) - n(item.cost_price)) / n(item.unit_price)) * 100).toFixed(1)}%`}</td>
@@ -314,7 +318,7 @@ function renderMaterials() {
               </tr>`
                   )
                   .join("")
-              : `<tr><td colspan="9"><div class="empty">沒有符合條件的材料</div></td></tr>`
+              : `<tr><td colspan="8"><div class="empty">沒有符合條件的材料</div></td></tr>`
           }
         </tbody>
       </table>
@@ -416,13 +420,6 @@ function materialSortPrice(item, selectedPriceBases, sort) {
   return selectedPriceBases.length > 1 && sort === "desc" ? Math.max(...prices) : Math.min(...prices);
 }
 
-function materialSpec(item) {
-  if (item.catalog_spec && (item.default_length === "" || item.default_length == null)) return `${h(item.catalog_spec)} cm`;
-  const values = [item.default_thickness, item.default_width, item.default_length].map((v) => (v === "" || v == null ? "—" : h(v)));
-  if (values.every((v) => v === "—")) return "—";
-  return `${values.join(" × ")} cm`;
-}
-
 function statusBadge(text, color = "") {
   return `<span class="badge ${color}">${h(text)}</span>`;
 }
@@ -439,17 +436,35 @@ function renderAccessDenied() {
 function renderAccounts() {
   if (!canManageAccounts()) return renderAccessDenied();
   const accounts = loadAccounts();
+  const actor = currentUser();
+  const canBootstrapOwner = actor?.role === "admin" && activeOwnerCount(accounts) === 0;
   return `
     ${pageHead("帳號管理", `共 ${accounts.length} 個帳號`, `<button class="btn" type="button" onclick="startAccountDraft()">＋ 新增帳號</button>`)}
-    ${ui.accountDraft ? renderAccountDraft() : ""}
+    ${canBootstrapOwner ? renderOwnerBootstrapPanel() : ""}
+    ${ui.accountDraft ? renderAccountDraft(accounts, actor) : ""}
     <div class="account-list">
-      ${accounts.map(renderAccountEditor).join("")}
+      ${accounts.map((account) => renderAccountEditor(account, accounts)).join("")}
     </div>
     ${renderAccountPermissionModal()}
+    ${renderOwnerBootstrapDialog(accounts)}
   `;
 }
 
-function renderAccountDraft() {
+function renderOwnerBootstrapPanel() {
+  return `
+    <section class="owner-bootstrap-panel" aria-labelledby="owner-bootstrap-title">
+      <div>
+        <span class="badge amber">尚未建立老闆</span>
+        <h2 id="owner-bootstrap-title">建立首位老闆</h2>
+        <p>請由目前管理人員主動選擇一個既有帳號。確認一次後，該帳號將取得最高本機權限。</p>
+      </div>
+      <button class="btn" type="button" data-owner-bootstrap-open onclick="openOwnerBootstrap()">選擇既有帳號</button>
+    </section>
+  `;
+}
+
+function renderAccountDraft(accounts = loadAccounts(), actor = currentUser()) {
+  const canCreateAdditionalOwner = actor?.role === "owner" && activeOwnerCount(accounts) > 0;
   return `
     <form class="account-row-card account-row-new" onsubmit="createAccount(event)">
       <div class="field">
@@ -467,9 +482,10 @@ function renderAccountDraft() {
       </div>
       <div class="field">
         <label>角色</label>
-        <select class="select" name="role">
-          ${renderRoleOptions(ui.accountDraft.role)}
+        <select class="select" name="role" data-account-role-select>
+          ${renderRoleOptions(ui.accountDraft.role, { allowOwner: canCreateAdditionalOwner })}
         </select>
+        <small>${canCreateAdditionalOwner ? "建立老闆帳號時會要求一次確認" : "首位老闆只能從既有帳號建立"}</small>
         <label class="checkbox-row" style="margin-top:8px"><input type="checkbox" name="is_active" value="1" checked> 啟用帳號</label>
       </div>
       <div class="account-actions">
@@ -480,40 +496,88 @@ function renderAccountDraft() {
   `;
 }
 
-function renderAccountEditor(account) {
+function renderAccountEditor(account, accounts = loadAccounts()) {
+  const actorRole = currentUser()?.role;
+  const ownerProtected = account.role === "owner" && actorRole !== "owner";
+  const lastActiveOwner = account.role === "owner" && account.is_active && activeOwnerCount(accounts) === 1;
+  const roleLocked = ownerProtected || lastActiveOwner;
+  const protectionText = ownerProtected
+    ? "老闆帳號只能由老闆管理"
+    : lastActiveOwner
+      ? "最後一位啟用中的老闆不可停用、刪除或降權"
+      : "";
   return `
-    <form class="account-row-card" onchange="autoSaveAccount(this,'${h(account.id)}')" onsubmit="saveAccount(event,'${h(account.id)}')">
+    <form class="account-row-card ${ownerProtected ? "is-protected" : ""}" data-account-id="${h(account.id)}" onsubmit="saveAccount(event,'${h(account.id)}')">
       <div class="field">
         <label>名稱</label>
-        <input class="input" name="name" value="${h(account.name)}" required>
+        <input class="input" name="name" value="${h(account.name)}" ${ownerProtected ? "disabled" : ""} required>
       </div>
       <div class="field">
         <label>帳號</label>
-        <input class="input" name="account" inputmode="numeric" pattern="[0-9]{3,20}" maxlength="20" value="${h(account.account)}" required>
+        <input class="input" name="account" inputmode="numeric" pattern="[0-9]{3,20}" maxlength="20" value="${h(account.account)}" ${ownerProtected ? "disabled" : ""} required>
       </div>
       <div class="field">
         <label>重設密碼</label>
-        <input class="input" name="password" type="password" inputmode="numeric" pattern="[0-9]{3,20}" maxlength="20" autocomplete="new-password" placeholder="不變更請留空">
+        <input class="input" name="password" type="password" inputmode="numeric" pattern="[0-9]{3,20}" maxlength="20" autocomplete="new-password" placeholder="不變更請留空" ${ownerProtected ? "disabled" : ""}>
         <small>系統不會顯示目前密碼</small>
       </div>
       <div class="field">
         <label>角色</label>
-        <select class="select" name="role">
-          ${renderRoleOptions(account.role)}
+        <select class="select" name="role" data-account-role-select ${roleLocked ? "disabled" : ""}>
+          ${renderRoleOptions(account.role, { allowOwner: actorRole === "owner" })}
         </select>
-        <label class="checkbox-row" style="margin-top:8px"><input type="checkbox" name="is_active" value="1" ${account.is_active ? "checked" : ""}> 啟用帳號</label>
+        <label class="checkbox-row" style="margin-top:8px"><input type="checkbox" name="is_active" value="1" ${account.is_active ? "checked" : ""} ${ownerProtected || lastActiveOwner ? "disabled" : ""}> 啟用帳號</label>
       </div>
       <div class="account-actions">
-        <button class="btn outline sm" type="button" onclick="openAccountPermissions('${h(account.id)}')">權限</button>
+        <button class="btn sm" type="submit" ${ownerProtected ? "disabled" : ""}>儲存變更</button>
+        <button class="btn outline sm" type="button" onclick="openAccountPermissions('${h(account.id)}')" ${ownerProtected ? "disabled" : ""}>權限</button>
+        <button class="btn danger sm" type="button" onclick="deleteAccount('${h(account.id)}')" ${ownerProtected || lastActiveOwner ? "disabled" : ""}>刪除</button>
       </div>
+      ${protectionText ? `<div class="account-protection-note">${h(protectionText)}</div>` : ""}
     </form>
   `;
 }
 
-function renderRoleOptions(selectedRole) {
+function renderRoleOptions(selectedRole, options = {}) {
   return Object.entries(ACCOUNT_ROLE_LABELS)
-    .map(([value, label]) => `<option value="${h(value)}" ${normalizeAccountRole(selectedRole) === value ? "selected" : ""}>${h(label)}</option>`)
+    .map(([value, label]) => {
+      const ownerDisabled = value === "owner" && options.allowOwner !== true;
+      return `<option value="${h(value)}" ${normalizeAccountRole(selectedRole) === value ? "selected" : ""} ${ownerDisabled ? "disabled" : ""}>${h(label)}</option>`;
+    })
     .join("");
+}
+
+function renderOwnerBootstrapDialog(accounts) {
+  if (!ui.ownerBootstrapOpen || currentUser()?.role !== "admin" || activeOwnerCount(accounts) > 0) return "";
+  const candidates = accounts.filter((account) => account.role !== "owner" && account.is_active !== false);
+  return `
+    <div class="permission-backdrop" role="presentation">
+      <section class="permission-modal owner-bootstrap-dialog" role="dialog" aria-modal="true" aria-labelledby="owner-bootstrap-dialog-title">
+        <div class="permission-head">
+          <div>
+            <span class="badge amber">一次性設定</span>
+            <h2 id="owner-bootstrap-dialog-title">確認建立首位老闆</h2>
+            <p>選定後此入口會消失；後續老闆異動只能由老闆管理。</p>
+          </div>
+          <button class="icon-btn" type="button" aria-label="關閉" onclick="closeOwnerBootstrap()">×</button>
+        </div>
+        <div class="owner-bootstrap-body">
+          <div class="field">
+            <label for="owner-bootstrap-account">既有帳號</label>
+            <select class="select" id="owner-bootstrap-account">
+              <option value="">請選擇帳號</option>
+              ${candidates.map((account) => `<option value="${h(account.id)}">${h(account.name)} · ${h(account.account)} · ${h(accountRoleLabel(account.role))}</option>`).join("")}
+            </select>
+          </div>
+          <div class="hint amber">這是可信設備上的本機最高權限，不等同伺服器身分驗證。</div>
+        </div>
+        <div class="owner-bootstrap-actions">
+          <button class="btn secondary" type="button" data-owner-bootstrap-cancel onclick="closeOwnerBootstrap()">取消</button>
+          <button class="btn" type="button" data-owner-bootstrap-confirm onclick="confirmOwnerBootstrap()">確認建立首位老闆</button>
+        </div>
+      </section>
+    </div>
+  `;
 }
 
 function renderAccountPermissionModal() {
@@ -544,7 +608,9 @@ function renderAccountPermissionModal() {
 }
 
 function renderPermissionToggle(account, key, title, description) {
-  const enabled = hasAccountPermission(account, key);
+  const ownerProtected = account.role === "owner" && currentUser()?.role !== "owner";
+  const fixedContractor = account.role === "contractor";
+  const enabled = fixedContractor ? false : hasAccountPermission(account, key);
   return `
     <div class="permission-row">
       <div>
@@ -558,6 +624,7 @@ function renderPermissionToggle(account, key, title, description) {
         aria-checked="${enabled}"
         title="${h(accountPermissionLabel(key))}"
         onclick="toggleAccountPermission('${h(account.id)}','${h(key)}')"
+        ${ownerProtected || fixedContractor ? "disabled" : ""}
       >
         <span></span>
       </button>
