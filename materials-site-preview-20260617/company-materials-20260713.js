@@ -114,6 +114,13 @@
       : material;
   }
 
+  function normalizeMaterialCategories(data) {
+    const domain = window.MaterialsQuoteDomain;
+    return typeof domain?.migrateMaterialCategories === "function"
+      ? domain.migrateMaterialCategories(data)
+      : data;
+  }
+
   function materialFromRow(row, existing = {}) {
     const [sourceRow, fixedId, name, category, unit, budgetPrice, salePrice] = row;
     const id = fixedId || `company-1150709-ah-${String(sourceRow).padStart(3, "0")}`;
@@ -260,6 +267,12 @@
   function saveData(data) {
     if (typeof state !== "undefined" && state && Array.isArray(state.materials)) {
       state.materials = data.materials;
+      if (Object.prototype.hasOwnProperty.call(data, "material_categories_schema")) {
+        state.material_categories_schema = data.material_categories_schema;
+      }
+      if (Object.prototype.hasOwnProperty.call(data, "material_categories")) {
+        state.material_categories = data.material_categories;
+      }
       if (typeof saveState === "function") saveState();
       else localStorage.setItem(STORAGE, JSON.stringify(data));
       return;
@@ -278,6 +291,10 @@
     ]);
     const complete = Array.from(expectedIds).every((materialId) => data.materials.some((item) => item.id === materialId));
     if (localStorage.getItem(MARKER) && complete) {
+      const normalizedData = normalizeMaterialCategories(data);
+      const categoriesChanged = data.material_categories_schema !== normalizedData.material_categories_schema
+        || JSON.stringify(data.material_categories) !== JSON.stringify(normalizedData.material_categories);
+      if (categoriesChanged) saveData(normalizedData);
       window.__companyMaterialsImport = { imported: 0, updated: 0, skipped: expectedIds.size, total: data.materials.length, catalog_profiles: PROFILES.length };
       return;
     }
@@ -296,7 +313,8 @@
     const untouched = data.materials.filter((item) => !expectedIds.has(item.id));
     const importedCount = imported.filter((item) => !existingById.has(item.id)).length;
     data.materials = [...imported, ...untouched].map(normalizeMaterialSpecifications);
-    saveData(data);
+    const normalizedData = normalizeMaterialCategories(data);
+    saveData(normalizedData);
 
     const stamp = new Date().toISOString();
     localStorage.setItem(MARKER, stamp);
@@ -304,7 +322,7 @@
       imported: importedCount,
       updated: imported.length - importedCount,
       skipped: 0,
-      total: data.materials.length,
+      total: normalizedData.materials.length,
       marker: MARKER,
       catalog_profiles: PROFILES.length,
       catalog_records: new Set(PROFILES.map(profileTargetId)).size,

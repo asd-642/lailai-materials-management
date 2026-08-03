@@ -253,6 +253,9 @@ let ui = {
   editingMaterial: null,
   materialSpecificationEditId: null,
   materialSpecificationFeedback: null,
+  materialCategoryDialogOpen: false,
+  materialCategoryDraft: "",
+  materialCategoryFeedback: null,
   toast: "",
 };
 
@@ -588,6 +591,16 @@ function currentUser() {
   clearAuthSession();
   return null;
 }
+
+window.MaterialCategories = MaterialsQuoteDomain.createMaterialCategoryStore({
+  getState: () => state,
+  setState: (nextState) => { state = nextState; },
+  saveState: () => saveState(),
+  getActor: () => {
+    const actor = currentUser();
+    return actor && hasAccountPermission(actor, "edit_material_prices") ? actor : null;
+  },
+});
 
 window.MaterialSpecifications = MaterialsQuoteDomain.createMaterialSpecificationStore({
   getState: () => state,

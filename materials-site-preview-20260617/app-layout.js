@@ -288,12 +288,13 @@ function renderMaterials() {
       if (diff === 0) return String(a.name).localeCompare(String(b.name), "zh-Hant");
       return sort === "asc" ? diff : -diff;
     });
-  const categories = Array.from(new Set(state.materials.map((item) => item.category).filter(Boolean)));
+  const categoryResult = window.MaterialCategories?.listCategories?.();
+  const categories = categoryResult?.ok ? categoryResult.value : [];
   return `
     ${pageHead("材料庫", `共 ${rows.length} 項材料`, canEdit ? `<a class="btn" href="${link("/materials/new")}">＋ 新增材料</a>` : "")}
     <form class="toolbar material-toolbar" onsubmit="searchMaterials(event)">
       <input class="input" style="max-width:320px" name="q" value="${h(q)}" placeholder="搜尋名稱、料號、分類…">
-      ${renderMaterialFilterPopover({ categories, selectedCategories, selectedPriceBases, minPrice, maxPrice, sort, q, includeInactive })}
+      ${renderMaterialFilterPopover({ categories, categoryError: categoryResult?.ok ? "" : categoryResult?.error || "材料分類目前無法讀取", canEdit, selectedCategories, selectedPriceBases, minPrice, maxPrice, sort, q, includeInactive })}
       <button class="btn secondary" type="submit">搜尋</button>
       <label class="checkbox-row toolbar-inactive-toggle"><input type="checkbox" name="inactive" ${includeInactive ? "checked" : ""}>含停用</label>
     </form>
@@ -323,11 +324,39 @@ function renderMaterials() {
         </tbody>
       </table>
     </div>
+    ${renderMaterialCategoryDialog()}
   `;
 }
 
+function renderMaterialCategoryDialog() {
+  if (!ui.materialCategoryDialogOpen) return "";
+  const feedback = ui.materialCategoryFeedback;
+  return `
+    <div class="permission-backdrop material-category-backdrop" data-material-category-dialog onclick="closeMaterialCategoryDialog(event)">
+      <form class="permission-modal material-category-dialog" aria-modal="true" role="dialog" aria-labelledby="material-category-dialog-title" onsubmit="submitMaterialCategory(event)" onclick="event.stopPropagation()">
+        <div class="permission-head">
+          <div>
+            <h2 id="material-category-dialog-title">新增材料分類</h2>
+          </div>
+          <button class="icon-btn" type="button" aria-label="關閉" title="關閉" onclick="closeMaterialCategoryDialog(event)">×</button>
+        </div>
+        <div class="material-category-dialog-body">
+          <label class="field">
+            <span>分類名稱</span>
+            <input class="input" name="category_name" value="${h(ui.materialCategoryDraft || "")}" maxlength="40" autocomplete="off" oninput="setMaterialCategoryDraft(event)" autofocus>
+          </label>
+          ${feedback ? `<div class="material-category-feedback is-error" role="status" data-material-category-feedback="${h(feedback.code || "MATERIAL_CATEGORY_INVALID_STATE")}">${h(feedback.message || "材料分類無法新增")}</div>` : ""}
+        </div>
+        <div class="material-category-dialog-actions">
+          <button class="btn outline" type="button" onclick="closeMaterialCategoryDialog(event)">取消</button>
+          <button class="btn" type="submit">新增分類</button>
+        </div>
+      </form>
+    </div>`;
+}
+
 function renderMaterialFilterPopover(filters) {
-  const { categories, selectedCategories, selectedPriceBases, minPrice, maxPrice, sort } = filters;
+  const { categories, categoryError, canEdit, selectedCategories, selectedPriceBases, minPrice, maxPrice, sort } = filters;
   const activeCount = materialFilterCount(filters);
   const selected = new Set(selectedCategories);
   const selectedBases = new Set(selectedPriceBases);
@@ -345,11 +374,12 @@ function renderMaterialFilterPopover(filters) {
               categories.length
                 ? categories
                     .map(
-                      (category) => `<label class="filter-tag"><input class="visually-hidden" type="checkbox" name="category" value="${h(category)}" ${selected.has(category) ? "checked" : ""}><span>${h(category)}</span></label>`
+                      (category) => `<label class="filter-tag"><input class="visually-hidden" type="checkbox" name="category" value="${h(category.name)}" ${selected.has(category.name) ? "checked" : ""}><span>${h(category.name)}</span></label>`
                     )
                     .join("")
-                : `<span class="muted">尚無分類</span>`
+                : `<span class="muted">${h(categoryError || "尚無分類")}</span>`
             }
+            ${canEdit ? `<button class="filter-tag-add" type="button" data-material-category-add onclick="openMaterialCategoryDialog(event)">＋ 新增分類</button>` : ""}
           </div>
         </div>
         <div class="filter-section">

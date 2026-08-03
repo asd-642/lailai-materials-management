@@ -519,6 +519,74 @@ window.searchMaterials = function (event) {
   go(`/materials${params.toString() ? `?${params}` : ""}`);
 };
 
+function materialCategoryUiMessage(result) {
+  const messages = {
+    MATERIAL_CATEGORY_INVALID_STATE: "材料分類資料目前無法使用，請重新整理後再試。",
+    MATERIAL_CATEGORY_INVALID_DATA: "材料分類資料格式有誤，資料未變更。",
+    MATERIAL_CATEGORY_INVALID_NAME: "請輸入分類名稱。",
+    MATERIAL_CATEGORY_DUPLICATE: "這個材料分類已經存在。",
+    MATERIAL_CATEGORY_NOT_FOUND: "找不到指定的材料分類。",
+    MATERIAL_CATEGORY_PERMISSION_DENIED: "目前帳號沒有新增材料分類的權限。",
+    MATERIAL_CATEGORY_PERSISTENCE_FAILED: "材料分類儲存失敗，資料未變更。",
+  };
+  return messages[result?.code] || "材料分類無法新增，資料未變更。";
+}
+
+window.openMaterialCategoryDialog = function (event) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  if (!canEditMaterialPrices()) {
+    const result = { ok: false, code: "MATERIAL_CATEGORY_PERMISSION_DENIED" };
+    setToast(materialCategoryUiMessage(result));
+    return result;
+  }
+  ui.materialCategoryDialogOpen = true;
+  ui.materialCategoryDraft = "";
+  ui.materialCategoryFeedback = null;
+  render();
+  window.setTimeout(() => document.querySelector('[data-material-category-dialog] [name="category_name"]')?.focus(), 0);
+  return { ok: true, code: "OK" };
+};
+
+window.closeMaterialCategoryDialog = function (event) {
+  event?.preventDefault?.();
+  ui.materialCategoryDialogOpen = false;
+  ui.materialCategoryDraft = "";
+  ui.materialCategoryFeedback = null;
+  render();
+  return { ok: true, code: "OK" };
+};
+
+window.setMaterialCategoryDraft = function (event) {
+  ui.materialCategoryDraft = String(event?.currentTarget?.value || "");
+};
+
+window.submitMaterialCategory = function (event) {
+  event.preventDefault();
+  const name = String(new FormData(event.currentTarget).get("category_name") || "");
+  ui.materialCategoryDraft = name;
+  const result = window.MaterialCategories?.createCategory?.(name) || {
+    ok: false,
+    code: "MATERIAL_CATEGORY_INVALID_STATE",
+  };
+  if (!result.ok) {
+    ui.materialCategoryFeedback = { code: result.code, message: materialCategoryUiMessage(result) };
+    render();
+    return result;
+  }
+  const refreshed = window.MaterialCategories.listCategories();
+  if (!refreshed.ok) {
+    ui.materialCategoryFeedback = { code: refreshed.code, message: "分類已新增，但清單暫時無法更新，請重新整理。" };
+    render();
+    return refreshed;
+  }
+  ui.materialCategoryDialogOpen = false;
+  ui.materialCategoryDraft = "";
+  ui.materialCategoryFeedback = null;
+  setToast(`分類「${result.value.name}」已新增`);
+  return result;
+};
+
 window.searchQuotes = function (event) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
@@ -533,12 +601,20 @@ window.saveMaterial = function (event, materialId) {
   if (!requirePermission("edit_material_prices")) return;
   const existing = materialId ? materialById(materialId) : null;
   const data = Object.fromEntries(new FormData(event.currentTarget));
+  const categoryResult = window.MaterialCategories?.selectCategory?.(data.category) || {
+    ok: false,
+    code: "MATERIAL_CATEGORY_INVALID_STATE",
+  };
+  if (!categoryResult.ok) {
+    setToast(materialCategoryUiMessage(categoryResult));
+    return categoryResult;
+  }
   const payload = MaterialsQuoteDomain.migrateMaterialSpecifications({
     ...(existing || {}),
     id: materialId || id("m"),
     name: data.name,
     code: data.code,
-    category: data.category,
+    category: categoryResult.value.name,
     unit: data.unit,
     pricing_type: data.pricing_type,
     default_thickness: Object.prototype.hasOwnProperty.call(data, "default_thickness") ? data.default_thickness : existing?.default_thickness ?? "",
@@ -2536,6 +2612,9 @@ window.addEventListener("hashchange", () => {
   ui.personalModal = null;
   ui.personalAvatarFile = null;
   ui.picker = null;
+  ui.materialCategoryDialogOpen = false;
+  ui.materialCategoryDraft = "";
+  ui.materialCategoryFeedback = null;
   if (!route().path.includes("/quotes/new") && !route().path.includes("/edit")) {
     ui.quoteDraft = null;
     ui.quoteDraftSource = null;

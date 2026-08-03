@@ -29,6 +29,17 @@
     PERSISTENCE_FAILED: "MATERIAL_SPEC_PERSISTENCE_FAILED",
     SPECIFICATION_NOT_FOUND: "MATERIAL_SPEC_NOT_FOUND",
   });
+  const MATERIAL_CATEGORIES_SCHEMA = "material-categories/v1";
+  const MATERIAL_CATEGORY_ERROR_CODES = Object.freeze({
+    OK: "OK",
+    INVALID_STATE: "MATERIAL_CATEGORY_INVALID_STATE",
+    INVALID_DATA: "MATERIAL_CATEGORY_INVALID_DATA",
+    INVALID_NAME: "MATERIAL_CATEGORY_INVALID_NAME",
+    DUPLICATE: "MATERIAL_CATEGORY_DUPLICATE",
+    NOT_FOUND: "MATERIAL_CATEGORY_NOT_FOUND",
+    PERMISSION_DENIED: "MATERIAL_CATEGORY_PERMISSION_DENIED",
+    PERSISTENCE_FAILED: "MATERIAL_CATEGORY_PERSISTENCE_FAILED",
+  });
   const QUOTE_MATERIAL_SPECIFICATION_SNAPSHOT_SCHEMA = "quote-material-specification-snapshot/v1";
   const QUOTE_MATERIAL_SPEC_ERROR_CODES = Object.freeze({
     OK: "OK",
@@ -550,6 +561,204 @@
       addSpecification,
       updateSpecification,
       deleteSpecification,
+    });
+  }
+
+  function materialCategorySuccess(value, extra = {}) {
+    return { ok: true, code: MATERIAL_CATEGORY_ERROR_CODES.OK, value: deepClone(value), ...extra };
+  }
+
+  function materialCategoryFailure(code, error, extra = {}) {
+    return { ok: false, code, error, value: null, ...extra };
+  }
+
+  function trimmedMaterialCategoryName(value) {
+    return typeof value === "string" ? value.trim() : "";
+  }
+
+  function materialCategoryKey(value) {
+    const name = trimmedMaterialCategoryName(value);
+    if (!name) return "";
+    return name.normalize("NFKC").replace(/\s+/g, " ").toLowerCase();
+  }
+
+  function normalizedMaterialCategory(value) {
+    const name = trimmedMaterialCategoryName(typeof value === "string" ? value : value?.name);
+    const key = materialCategoryKey(name);
+    if (!name || !key) return null;
+    return {
+      id: `mc:${encodeURIComponent(key)}`,
+      key,
+      name,
+    };
+  }
+
+  function migrateMaterialCategories(rawState) {
+    const source = deepClone(rawState && typeof rawState === "object" && !Array.isArray(rawState) ? rawState : {});
+    const existingSchema = String(source.material_categories_schema || "");
+    if (existingSchema && existingSchema !== MATERIAL_CATEGORIES_SCHEMA) return source;
+
+    if (Object.prototype.hasOwnProperty.call(source, "material_categories") && !Array.isArray(source.material_categories)) {
+      return {
+        ...source,
+        material_categories_schema: MATERIAL_CATEGORIES_SCHEMA,
+      };
+    }
+
+    const categories = [];
+    const knownKeys = new Set();
+    for (const rawCategory of Array.isArray(source.material_categories) ? source.material_categories : []) {
+      const category = normalizedMaterialCategory(rawCategory);
+      if (existingSchema === MATERIAL_CATEGORIES_SCHEMA) {
+        categories.push(deepClone(rawCategory));
+        if (category) knownKeys.add(category.key);
+        continue;
+      }
+      if (!category) {
+        categories.push(deepClone(rawCategory));
+        continue;
+      }
+      if (knownKeys.has(category.key)) continue;
+      categories.push(category);
+      knownKeys.add(category.key);
+    }
+
+    for (const material of Array.isArray(source.materials) ? source.materials : []) {
+      const category = normalizedMaterialCategory(material?.category);
+      if (!category || knownKeys.has(category.key)) continue;
+      categories.push(category);
+      knownKeys.add(category.key);
+    }
+
+    return {
+      ...source,
+      material_categories_schema: MATERIAL_CATEGORIES_SCHEMA,
+      material_categories: categories,
+    };
+  }
+
+  function selectMaterialCategoryData(rawState) {
+    if (!rawState || typeof rawState !== "object" || Array.isArray(rawState)) {
+      return materialCategoryFailure(MATERIAL_CATEGORY_ERROR_CODES.INVALID_STATE, "材料分類 state 無效");
+    }
+    const state = migrateMaterialCategories(rawState);
+    if (state.material_categories_schema !== MATERIAL_CATEGORIES_SCHEMA || !Array.isArray(state.material_categories)) {
+      return materialCategoryFailure(MATERIAL_CATEGORY_ERROR_CODES.INVALID_DATA, "材料分類資料格式無效");
+    }
+
+    const categories = [];
+    const ids = new Set();
+    const keys = new Set();
+    for (const rawCategory of state.material_categories) {
+      const category = normalizedMaterialCategory(rawCategory);
+      if (!category
+        || typeof rawCategory !== "object"
+        || Array.isArray(rawCategory)
+        || rawCategory.id !== category.id
+        || rawCategory.key !== category.key
+        || rawCategory.name !== category.name
+        || ids.has(category.id)
+        || keys.has(category.key)) {
+        return materialCategoryFailure(MATERIAL_CATEGORY_ERROR_CODES.INVALID_DATA, "材料分類資料無效或包含重複分類");
+      }
+      ids.add(category.id);
+      keys.add(category.key);
+      categories.push(category);
+    }
+    return materialCategorySuccess(categories, { state });
+  }
+
+  function validateMaterialCategories(state) {
+    const selected = selectMaterialCategoryData(state);
+    if (selected.ok) {
+      return { ok: true, code: MATERIAL_CATEGORY_ERROR_CODES.OK, error: "", errors: [], categories: deepClone(selected.value) };
+    }
+    return { ok: false, code: selected.code, error: selected.error, errors: [selected.error], categories: [] };
+  }
+
+  function createMaterialCategoryStore(adapters = {}) {
+    function readSelection(selector) {
+      let currentState;
+      try {
+        currentState = adapters.getState?.();
+      } catch (error) {
+        return materialCategoryFailure(MATERIAL_CATEGORY_ERROR_CODES.INVALID_STATE, "無法讀取材料分類 state");
+      }
+      return selector(currentState);
+    }
+
+    function listCategories() {
+      return readSelection((currentState) => {
+        const selected = selectMaterialCategoryData(currentState);
+        return selected.ok ? materialCategorySuccess(selected.value) : selected;
+      });
+    }
+
+    function selectCategory(categoryIdOrName) {
+      return readSelection((currentState) => {
+        const selected = selectMaterialCategoryData(currentState);
+        if (!selected.ok) return selected;
+        const query = trimmedMaterialCategoryName(categoryIdOrName);
+        const key = materialCategoryKey(query);
+        if (!query) return materialCategoryFailure(MATERIAL_CATEGORY_ERROR_CODES.INVALID_NAME, "分類名稱或識別碼不可空白");
+        const category = selected.value.find((record) => record.id === query)
+          || selected.value.find((record) => record.key === query || record.key === key);
+        return category
+          ? materialCategorySuccess(category)
+          : materialCategoryFailure(MATERIAL_CATEGORY_ERROR_CODES.NOT_FOUND, "找不到指定材料分類");
+      });
+    }
+
+    function commit(mutation) {
+      let previousState;
+      let actor;
+      try {
+        previousState = adapters.getState?.();
+        actor = adapters.getActor?.() || null;
+      } catch (error) {
+        return materialCategoryFailure(MATERIAL_CATEGORY_ERROR_CODES.INVALID_STATE, "無法讀取材料分類 state 或目前帳號");
+      }
+      if (!materialSpecificationActorCanWrite(actor)) {
+        return materialCategoryFailure(MATERIAL_CATEGORY_ERROR_CODES.PERMISSION_DENIED, "目前帳號沒有修改材料分類的權限");
+      }
+      const result = mutation(previousState);
+      if (!result.ok) return result;
+      try {
+        if (typeof adapters.setState !== "function" || typeof adapters.saveState !== "function") throw new Error("missing persistence adapters");
+        adapters.setState(result.nextState);
+        if (adapters.saveState() !== true) throw new Error("save rejected");
+      } catch (error) {
+        try {
+          if (typeof adapters.setState === "function") adapters.setState(previousState);
+        } catch (rollbackError) {
+          // The stable failure result remains fail-closed even if an adapter is broken.
+        }
+        return materialCategoryFailure(MATERIAL_CATEGORY_ERROR_CODES.PERSISTENCE_FAILED, "材料分類儲存失敗，state 已回滾");
+      }
+      return materialCategorySuccess(result.value);
+    }
+
+    function createCategory(name) {
+      return commit((currentState) => {
+        const selected = selectMaterialCategoryData(currentState);
+        if (!selected.ok) return selected;
+        const category = normalizedMaterialCategory(name);
+        if (!category) return materialCategoryFailure(MATERIAL_CATEGORY_ERROR_CODES.INVALID_NAME, "分類名稱不可空白");
+        if (selected.value.some((record) => record.key === category.key)) {
+          return materialCategoryFailure(MATERIAL_CATEGORY_ERROR_CODES.DUPLICATE, "相同材料分類已存在");
+        }
+        const nextState = deepClone(selected.state);
+        nextState.material_categories.push(category);
+        const nextValidation = selectMaterialCategoryData(nextState);
+        if (!nextValidation.ok) return nextValidation;
+        return materialCategorySuccess(category, { nextState });
+      });
+    }
+
+    return Object.freeze({
+      listCategories,
+      selectCategory,
+      createCategory,
     });
   }
 
@@ -2723,7 +2932,7 @@
     };
     const materials = (Array.isArray(source.materials) ? source.materials : []).map((material) => migrateMaterialRecord(material, migrationContext));
     const materialMap = new Map(materials.map((material) => [material.id, material]));
-    return {
+    return migrateMaterialCategories({
       ...source,
       materials,
       customers: Array.isArray(source.customers) ? source.customers : [],
@@ -2737,7 +2946,7 @@
         quote_approval_history_schema: LOCAL_QUOTE_APPROVAL_HISTORY_SCHEMA,
         migrated_at: Number(source.meta?.schema_version) === Number(targetSchemaVersion) ? source.meta?.migrated_at || "" : migratedAt,
       },
-    };
+    });
   }
 
   function migrateQuoteForSchema(quote, materials = []) {
@@ -2936,6 +3145,8 @@
       const validation = validateMaterialForPersistence(migratedMaterials[index]);
       errors.push(...validation.errors.map((error) => `材料 ${index + 1}：${error}`));
     });
+    const materialCategoryValidation = validateMaterialCategories(state);
+    errors.push(...materialCategoryValidation.errors.map((error) => `材料分類：${error}`));
 
     (Array.isArray(state.quotes) ? state.quotes : []).forEach((quote, quoteIndex) => {
       if (hasValue(quote?.manualTotal)) {
@@ -3638,6 +3849,8 @@
     DIMENSION_UNIT_TO_CM,
     MATERIAL_SPECIFICATIONS_SCHEMA,
     MATERIAL_SPEC_ERROR_CODES,
+    MATERIAL_CATEGORIES_SCHEMA,
+    MATERIAL_CATEGORY_ERROR_CODES,
     QUOTE_MATERIAL_SPECIFICATION_SNAPSHOT_SCHEMA,
     QUOTE_MATERIAL_SPEC_ERROR_CODES,
     EXCEL_FORWARD_CALCULATION_MODE,
@@ -3659,6 +3872,7 @@
     calculateQuotePaymentSchedule,
     canonicalStringify,
     createBackupBundle,
+    createMaterialCategoryStore,
     createMaterialSpecificationStore,
     createQuoteMaterialSpecificationStore,
     createLocalQuoteRevision,
@@ -3674,6 +3888,7 @@
     isLocalQuoteReviewer,
     initializeExcelLaborDetail,
     migrateAppState,
+    migrateMaterialCategories,
     migrateMaterialSpecifications,
     migrateQuoteForSchema,
     nextQuoteNo,
@@ -3692,6 +3907,7 @@
     validateAppStateForImport,
     validateBackupBundle,
     validateExcelCalculationSnapshot,
+    validateMaterialCategories,
     validateMaterialForPersistence,
     validateMaterialSpecifications,
     validatePreparationReadiness,

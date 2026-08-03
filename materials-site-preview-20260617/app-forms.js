@@ -43,7 +43,7 @@ function renderMaterialForm(materialId) {
       <section class="card"><div class="card-header"><h2>基本資料</h2></div><div class="card-body form-grid">
         ${field("材料名稱", "name", data.name, true)}
         ${field("料號", "code", data.code, false, "選填,唯一")}
-        ${field("分類", "category", data.category, false, "例:磁磚 / 木材 / 五金")}
+        ${materialCategoryField(data.category)}
         ${unitField(data.unit)}
       </div></section>
       <section class="card"><div class="card-header"><h2>計價方式與規格</h2></div><div class="card-body">
@@ -82,6 +82,18 @@ function renderMaterialForm(materialId) {
 
 function field(label, name, value, required = false, hint = "") {
   return `<div class="field"><label>${h(label)}${required ? "*" : ""}</label><input class="input" name="${h(name)}" value="${h(value)}" ${required ? "required" : ""}>${hint ? `<small>${h(hint)}</small>` : ""}</div>`;
+}
+
+function materialCategoryField(selectedCategory) {
+  const result = window.MaterialCategories?.listCategories?.();
+  if (!result?.ok) {
+    return `<div class="field"><label>分類*</label><select class="select" name="category" required disabled><option>分類資料目前無法使用</option></select><small class="field-error" role="status">請重新整理後再試。</small></div>`;
+  }
+  const selected = String(selectedCategory || "");
+  const options = result.value.map((category) => (
+    `<option value="${h(category.id)}" ${category.name === selected || category.id === selected ? "selected" : ""}>${h(category.name)}</option>`
+  )).join("");
+  return `<div class="field"><label>分類*</label><select class="select" name="category" required data-material-category-select><option value="">請選擇分類</option>${options}</select></div>`;
 }
 
 function renderMaterialSpecificationSection(material) {
