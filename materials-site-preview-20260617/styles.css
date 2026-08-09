@@ -1934,6 +1934,106 @@ tr:last-child td {
   color: #b91c1c;
 }
 
+.owner-bootstrap-restore-dialog {
+  width: 680px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.owner-bootstrap-restore-form {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.owner-bootstrap-restore-form .approval-dialog-body {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.owner-bootstrap-restore-form .approval-dialog-actions {
+  flex: 0 0 auto;
+}
+
+.owner-bootstrap-restore-warning,
+.owner-bootstrap-restore-danger {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(245, 158, 11, 0.42);
+  border-radius: 7px;
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--text);
+  line-height: 1.65;
+}
+
+.owner-bootstrap-restore-danger {
+  border-color: rgba(239, 68, 68, 0.48);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.owner-bootstrap-restore-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--line);
+}
+
+.owner-bootstrap-restore-facts > div {
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--panel);
+}
+
+.owner-bootstrap-restore-facts dt {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.owner-bootstrap-restore-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.owner-bootstrap-restore-form .field > span {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+@media (max-width: 640px) {
+  .owner-bootstrap-restore-backdrop {
+    align-items: start;
+    padding: 10px;
+  }
+
+  .owner-bootstrap-restore-dialog {
+    max-height: calc(100vh - 20px);
+  }
+
+  .owner-bootstrap-restore-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .owner-bootstrap-restore-form .approval-dialog-actions {
+    flex-direction: column;
+    align-items: stretch;
+    background: var(--panel);
+  }
+
+  .owner-bootstrap-restore-form .approval-dialog-actions .btn {
+    width: 100%;
+  }
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

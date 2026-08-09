@@ -123,22 +123,72 @@
   async function importFromBackup(snapshot, actor, options = {}) {
     if (!canReadAll(actor)) return error("BUG_BACKUP_PERMISSION_DENIED", "restore");
     if (!snapshot || snapshot.schema !== "bug-reports-backup/v1" || !Array.isArray(snapshot.reports) || !Array.isArray(snapshot.attachments)) return error("BUG_BACKUP_SCHEMA_INVALID", "restore");
-    const reportIds = new Set(snapshot.reports.map((report) => report.id));
     const adapter = options.attachmentAdapter || defaultAdapter();
-    const written = [];
-    try {
-      for (const attachment of snapshot.attachments) {
-        if (!reportIds.has(attachment.report_id)) throw new Error("BUG_BACKUP_ATTACHMENT_ORPHAN");
-        const bytes = bytesFromBase64(attachment.bytes_base64);
-        const checked = await validateAttachment({ name: attachment.name, type: attachment.mime_type, size: bytes.length, bytes });
-        if (!checked.ok) throw new Error(checked.code);
-        await adapter.put({ id: attachment.id, report_id: attachment.report_id, name: attachment.name, mime_type: attachment.mime_type, size: bytes.length, bytes });
-        written.push(attachment.id);
+    const previous = await exportForBackup(options);
+    if (!previous.ok) return error("BUG_BACKUP_CURRENT_STATE_INVALID", "restore");
+    const reportIds = new Set();
+    const expectedAttachments = new Map();
+    for (const report of snapshot.reports) {
+      if (!report?.id || reportIds.has(report.id)) return error("BUG_BACKUP_SCHEMA_INVALID", "restore");
+      reportIds.add(report.id);
+      for (const metadata of Array.isArray(report.attachments) ? report.attachments : []) {
+        if (!metadata?.id || expectedAttachments.has(metadata.id)) return error("BUG_BACKUP_SCHEMA_INVALID", "restore");
+        expectedAttachments.set(metadata.id, { ...metadata, report_id: report.id });
       }
+    }
+    const incomingRecords = [];
+    for (const attachment of snapshot.attachments) {
+      const metadata = expectedAttachments.get(attachment?.id);
+      if (!metadata
+        || attachment.report_id !== metadata.report_id
+        || attachment.name !== metadata.name
+        || attachment.mime_type !== metadata.mime_type
+        || Number(attachment.size) !== Number(metadata.size)) return error("BUG_BACKUP_SCHEMA_INVALID", "restore");
+      const bytes = bytesFromBase64(attachment.bytes_base64);
+      const checked = await validateAttachment({ name: attachment.name, type: attachment.mime_type, size: bytes.length, bytes });
+      if (!checked.ok || checked.value.size !== Number(metadata.size)) return error(checked.code || "BUG_BACKUP_SCHEMA_INVALID", "restore");
+      incomingRecords.push({
+        id: attachment.id,
+        report_id: attachment.report_id,
+        name: attachment.name,
+        mime_type: attachment.mime_type,
+        size: bytes.length,
+        bytes,
+      });
+      expectedAttachments.delete(attachment.id);
+    }
+    if (expectedAttachments.size > 0) return error("BUG_BACKUP_SCHEMA_INVALID", "restore");
+    const previousIds = new Set(previous.value.attachments.map((attachment) => attachment.id));
+    const incomingIds = new Set(incomingRecords.map((attachment) => attachment.id));
+    try {
+      for (const record of incomingRecords) await adapter.put(record);
       if (!writeReports(snapshot.reports, options.storage)) throw new Error("BUG_METADATA_SAVE_FAILED");
+      for (const attachmentId of previousIds) {
+        if (!incomingIds.has(attachmentId)) await adapter.remove(attachmentId);
+      }
       return ok(clone(snapshot.reports));
     } catch (e) {
-      await Promise.all(written.map((attachmentId) => adapter.remove(attachmentId).catch(() => undefined)));
+      let rollbackOk = true;
+      try {
+        for (const attachment of previous.value.attachments) {
+          const bytes = bytesFromBase64(attachment.bytes_base64);
+          await adapter.put({
+            id: attachment.id,
+            report_id: attachment.report_id,
+            name: attachment.name,
+            mime_type: attachment.mime_type,
+            size: bytes.length,
+            bytes,
+          });
+        }
+        for (const attachmentId of incomingIds) {
+          if (!previousIds.has(attachmentId)) await adapter.remove(attachmentId);
+        }
+        if (!writeReports(previous.value.reports, options.storage)) rollbackOk = false;
+      } catch (rollbackError) {
+        rollbackOk = false;
+      }
+      if (!rollbackOk) return error("BUG_BACKUP_ROLLBACK_FAILED", "restore");
       return error(e.message === "BUG_METADATA_SAVE_FAILED" ? e.message : "BUG_BACKUP_RESTORE_FAILED", "restore");
     }
   }

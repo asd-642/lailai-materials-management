@@ -9,7 +9,7 @@ function rawFrontendSessionRole() {
 
 function frontendAccessRole() {
   const rawRole = rawFrontendSessionRole();
-  const account = currentUser();
+  const account = currentUser({ readOnly: true });
   if (!account || !ACCOUNT_ROLES.includes(rawRole) || account.role !== rawRole) return "unknown";
   return rawRole;
 }
@@ -27,14 +27,35 @@ function canUseFrontendWrite() {
   return ["owner", "admin", "staff"].includes(frontendAccessRole());
 }
 
-function frontendWriteDenied() {
+function showFrontendWriteDeniedToastWithoutRender(message) {
+  if (typeof document === "undefined" || !document.body || typeof ui === "undefined") {
+    if (typeof setToast === "function") setToast(message);
+    return;
+  }
+  ui.toast = message;
+  document.querySelector("[data-frontend-write-denied-toast]")?.remove();
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.dataset.frontendWriteDeniedToast = "true";
+  toast.setAttribute("role", "status");
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  window.clearTimeout(showFrontendWriteDeniedToastWithoutRender.timer);
+  showFrontendWriteDeniedToastWithoutRender.timer = window.setTimeout(() => {
+    if (ui.toast === message) ui.toast = "";
+    toast.remove();
+  }, 1800);
+}
+
+function frontendWriteDenied(options = {}) {
   const unknown = frontendAccessRole() === "unknown";
   const result = {
     ok: false,
     code: unknown ? "UNKNOWN_ROLE" : "READ_ONLY_ROLE",
     error: unknown ? "目前登入角色無法辨識，介面已鎖定為唯讀" : "外包人員僅可檢視，不能變更或匯出資料",
   };
-  if (typeof setToast === "function") setToast(result.error);
+  if (options.withoutRender === true) showFrontendWriteDeniedToastWithoutRender(result.error);
+  else if (typeof setToast === "function") setToast(result.error);
   return result;
 }
 
@@ -152,7 +173,7 @@ function installFrontendWriteGuards() {
         const event = args[0];
         if (event && typeof event.preventDefault === "function") event.preventDefault();
         if (event?.currentTarget?.type === "file") event.currentTarget.value = "";
-        return frontendWriteDenied();
+        return frontendWriteDenied({ withoutRender: name === "importDataBackup" });
       }
       return original.apply(this, args);
     };

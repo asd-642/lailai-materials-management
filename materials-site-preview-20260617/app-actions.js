@@ -2208,209 +2208,906 @@ window.createQuoteRevision = function (quoteId) {
   go(`/quotes/${revision.id}/edit`);
 };
 
-function downloadBackupBundle(bundle, suffix = "") {
-  const date = MaterialsQuoteDomain.formatLocalDate(new Date()).replaceAll("-", "");
-  const filename = `materials-quote-backup-${date}${suffix ? `-${suffix}` : ""}.json`;
-  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+const OWNER_BOOTSTRAP_RESTORE_CONFIRMATION = "建立首位老闆並還原";
+const DATA_BACKUP_RESTORE_LOCK = "materials-quote-data-backup-restore";
+let dataBackupRestoreInProgress = false;
+
+function showBackupDownloadToastWithoutRender(message) {
+  if (typeof document === "undefined" || !document.body) return;
+  document.querySelector("[data-backup-download-toast]")?.remove();
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.dataset.backupDownloadToast = "true";
+  toast.setAttribute("role", "status");
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  window.clearTimeout(showBackupDownloadToastWithoutRender.timer);
+  showBackupDownloadToastWithoutRender.timer = window.setTimeout(() => toast.remove(), 2600);
 }
 
-async function createCurrentBackupBundle() {
-  const accounts = await migrateLegacyAccountPasswords();
-  let bugReports;
-  if (typeof BugReportStore !== "undefined") {
+async function downloadBackupBundle(bundle, suffix = "") {
+  const date = MaterialsQuoteDomain.formatLocalDate(new Date()).replaceAll("-", "");
+  const filename = `materials-quote-backup-${date}${suffix ? `-${suffix}` : ""}.json`;
+  let url = "";
+  let anchor = null;
+  let result = { ok: false, code: "BACKUP_DOWNLOAD_INITIATION_FAILED", filename };
+  try {
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json;charset=utf-8" });
+    url = URL.createObjectURL(blob);
+    anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    result = { ok: true, code: "", status: "initiated", filename };
+  } catch (error) {
+    result = { ok: false, code: "BACKUP_DOWNLOAD_INITIATION_FAILED", filename };
+  } finally {
+    let cleanupFailed = false;
+    try {
+      anchor?.remove();
+    } catch (error) {
+      cleanupFailed = true;
+    }
+    if (url) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        cleanupFailed = true;
+      }
+    }
+    if (cleanupFailed && result.ok) result = { ok: false, code: "BACKUP_DOWNLOAD_CLEANUP_FAILED", filename };
+  }
+  return result;
+}
+
+async function accountsForBackupWithoutWrite(accounts) {
+  const secured = [];
+  for (const source of Array.isArray(accounts) ? accounts : []) {
+    const account = normalizeAccountRecord(source);
+    if (!account.password_hash && account.password) account.password_hash = await hashNumericPin(account.password);
+    if (!account.password_hash) throw new Error("ACCOUNT_CREDENTIAL_MISSING");
+    delete account.password;
+    secured.push(account);
+  }
+  return secured;
+}
+
+async function createCurrentBackupBundle(options = {}) {
+  const accountSource = Object.prototype.hasOwnProperty.call(options, "accounts")
+    ? options.accounts
+    : readRestoreAccountsWithoutWrite();
+  if (!Array.isArray(accountSource) || !accountSource.length) throw new Error("ACCOUNT_BACKUP_SOURCE_INVALID");
+  const accounts = await accountsForBackupWithoutWrite(accountSource);
+  let bugReports = options.bugReports;
+  if (bugReports === undefined && typeof BugReportStore !== "undefined") {
     const exportedBugReports = await BugReportStore.exportForBackup();
     if (!exportedBugReports.ok) throw new Error(exportedBugReports.code);
     bugReports = exportedBugReports.value;
   }
   return MaterialsQuoteDomain.createBackupBundle({
-    state,
+    state: options.state || state,
     accounts: accounts.map(({ password, ...account }) => account),
-    workLogs: loadWorkLogs(),
+    workLogs: options.workLogs || loadWorkLogs(),
     bugReports,
     exportedAt: new Date().toISOString(),
     appVersion: MaterialsQuoteDomain.BACKUP_APP_VERSION,
   });
 }
 
-function captureRestoreStorage() {
-  return Object.keys(localStorage).reduce((snapshot, key) => {
+async function restoreSha256Text(value) {
+  if (!globalThis.crypto?.subtle) throw new Error("RESTORE_SHA256_UNAVAILABLE");
+  const bytes = new TextEncoder().encode(String(value));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function restoreCanonicalHash(value) {
+  return restoreSha256Text(MaterialsQuoteDomain.canonicalStringify(value));
+}
+
+async function captureRestoreStorage() {
+  const values = Object.keys(localStorage).sort().reduce((snapshot, key) => {
     snapshot[key] = localStorage.getItem(key);
     return snapshot;
   }, {});
+  const entries = {};
+  for (const [key, value] of Object.entries(values)) {
+    const text = String(value ?? "");
+    entries[key] = {
+      utf8Bytes: new TextEncoder().encode(text).length,
+      sha256: await restoreSha256Text(text),
+    };
+  }
+  return { values, entries, fingerprint: await restoreCanonicalHash(entries) };
 }
 
 function rollbackRestoreStorage(snapshot) {
-  Object.keys(localStorage).filter((key) => !Object.prototype.hasOwnProperty.call(snapshot, key)).forEach((key) => localStorage.removeItem(key));
-  Object.entries(snapshot).forEach(([key, value]) => {
+  const values = snapshot?.values || {};
+  Object.keys(localStorage).filter((key) => !Object.prototype.hasOwnProperty.call(values, key)).forEach((key) => localStorage.removeItem(key));
+  Object.entries(values).forEach(([key, value]) => {
     if (value == null) localStorage.removeItem(key);
     else localStorage.setItem(key, value);
   });
 }
 
-window.exportDataBackup = async function (suffix = "") {
-  if (!requirePermission("edit_company_settings", "只有具備公司設定權限的人員可以下載完整備份")) return;
-  let bundle;
+function captureRestoreMemory() {
+  return {
+    state,
+    quoteDraft: ui.quoteDraft,
+    quoteDraftSavedAt: ui.quoteDraftSavedAt,
+    quoteDraftRestored: ui.quoteDraftRestored,
+    quoteDraftDirty: ui.quoteDraftDirty,
+    quoteCatalogSelections: ui.quoteCatalogSelections,
+    quoteCustomSelections: ui.quoteCustomSelections,
+    quoteSpecificationSelections: ui.quoteSpecificationSelections,
+    quoteLaborDetailFeedback: ui.quoteLaborDetailFeedback,
+  };
+}
+
+function rollbackRestoreMemory(snapshot) {
+  state = snapshot.state;
+  ui.quoteDraft = snapshot.quoteDraft;
+  ui.quoteDraftSavedAt = snapshot.quoteDraftSavedAt;
+  ui.quoteDraftRestored = snapshot.quoteDraftRestored;
+  ui.quoteDraftDirty = snapshot.quoteDraftDirty;
+  ui.quoteCatalogSelections = snapshot.quoteCatalogSelections;
+  ui.quoteCustomSelections = snapshot.quoteCustomSelections;
+  ui.quoteSpecificationSelections = snapshot.quoteSpecificationSelections;
+  ui.quoteLaborDetailFeedback = snapshot.quoteLaborDetailFeedback;
+}
+
+function readRestoreSessionActor() {
+  if (localStorage.getItem(AUTH_KEY) !== "yes") return null;
   try {
-    bundle = await createCurrentBackupBundle();
+    const actor = JSON.parse(localStorage.getItem(AUTH_USER_KEY) || "null");
+    return actor && typeof actor === "object" ? actor : null;
   } catch (error) {
-    setToast(`備份未建立：${error instanceof Error ? error.message : "資料驗證失敗"}`);
     return null;
   }
-  downloadBackupBundle(bundle, suffix);
-  logWorkEvent("backup", "下載完整資料備份", { entityType: "settings", detail: `格式：${bundle.schema}` });
-  setToast("完整備份已下載");
+}
+
+function readRestoreAccountsWithoutWrite() {
+  try {
+    const records = JSON.parse(localStorage.getItem(ACCOUNTS_KEY) || "null");
+    if (!Array.isArray(records) || !records.length) return [];
+    if (records.some((account) => !account?.id || !account?.account || !ACCOUNT_ROLES.includes(account.role))) return [];
+    const normalized = records.map(normalizeAccountRecord).filter((account) => account.account);
+    return normalized.length === records.length ? normalized : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function readRestoreCurrentActor(accounts, sessionActor = readRestoreSessionActor()) {
+  if (!sessionActor || sessionActor.is_active === false) return null;
+  const matches = (Array.isArray(accounts) ? accounts : []).filter((account) => (
+    account.id === sessionActor.id && account.account === sessionActor.account
+  ));
+  if (matches.length !== 1) return null;
+  const actor = matches[0];
+  return actor.is_active !== false && actor.role === sessionActor.role ? actor : null;
+}
+
+function restoreFileIdentity(file) {
+  return {
+    name: String(file?.name || ""),
+    size: Number(file?.size || 0),
+    type: String(file?.type || ""),
+    lastModified: Number(file?.lastModified || 0),
+  };
+}
+
+function restoreFileIsStillSelected(input, file, identity) {
+  const selected = input.files?.[0];
+  return selected === file
+    && MaterialsQuoteDomain.canonicalStringify(restoreFileIdentity(selected)) === MaterialsQuoteDomain.canonicalStringify(identity);
+}
+
+function normalizedAccountsForRestore(accounts) {
+  return (Array.isArray(accounts) ? accounts : []).map((source) => {
+    const account = normalizeAccountRecord(source);
+    if (account.password_hash) delete account.password;
+    return account;
+  });
+}
+
+function validateRestoreOwnerContinuity({ actor, previousAccounts, restoredAccounts } = {}) {
+  const previousOwners = (Array.isArray(previousAccounts) ? previousAccounts : []).filter((account) => account.role === "owner");
+  const restoredOwners = (Array.isArray(restoredAccounts) ? restoredAccounts : []).filter((account) => account.role === "owner");
+  if (previousOwners.length === 0) {
+    return { ok: true, code: "", bootstrapRequired: restoredOwners.length > 0 };
+  }
+  for (const previousOwner of previousOwners) {
+    const restoredOwner = restoredOwners.find((account) => account.id === previousOwner.id && account.account === previousOwner.account);
+    if (!restoredOwner
+      || restoredOwner.role !== "owner"
+      || (previousOwner.is_active !== false && restoredOwner.is_active === false)) {
+      return { ok: false, code: "RESTORE_EXISTING_OWNER_PROTECTED", bootstrapRequired: false };
+    }
+    const comparablePreviousOwner = { ...previousOwner };
+    const comparableRestoredOwner = { ...restoredOwner };
+    if (comparablePreviousOwner.password_hash) delete comparablePreviousOwner.password;
+    if (comparableRestoredOwner.password_hash) delete comparableRestoredOwner.password;
+    if (actor?.role !== "owner"
+      && MaterialsQuoteDomain.canonicalStringify(comparableRestoredOwner) !== MaterialsQuoteDomain.canonicalStringify(comparablePreviousOwner)) {
+      return { ok: false, code: "RESTORE_EXISTING_OWNER_PROTECTED", bootstrapRequired: false };
+    }
+  }
+  const addedOwner = restoredOwners.some((restoredOwner) => !previousOwners.some((previousOwner) => (
+    previousOwner.id === restoredOwner.id && previousOwner.account === restoredOwner.account
+  )));
+  if (addedOwner && actor?.role !== "owner") {
+    return { ok: false, code: "RESTORE_EXISTING_OWNER_PROTECTED", bootstrapRequired: false };
+  }
+  return { ok: true, code: "", bootstrapRequired: false };
+}
+
+function evaluateOwnerBootstrapRestoreEligibility({
+  validation,
+  restoreContext,
+  stateValidation,
+  bundle,
+  restoredState,
+  sessionActor,
+  previousUser,
+  previousAccounts,
+  previousAccountsFingerprint,
+  restoredAccounts,
+} = {}) {
+  const reject = (code) => ({ ok: false, code });
+  if (validation?.ok !== true
+    || validation.channel !== "self_backup"
+    || restoreContext?.channel !== "self_backup"
+    || restoreContext?.source !== "self_backup") return reject("OWNER_BOOTSTRAP_SELF_BACKUP_REQUIRED");
+  if (stateValidation?.ok !== true
+    || MaterialsQuoteDomain.canonicalStringify(restoredState) !== MaterialsQuoteDomain.canonicalStringify(bundle?.data?.state)) {
+    return reject("OWNER_BOOTSTRAP_STATE_MISMATCH");
+  }
+  const payloadHash = String(bundle?.manifest?.canonical_payload?.sha256 || "");
+  if (!/^[a-f0-9]{64}$/i.test(payloadHash)) return reject("OWNER_BOOTSTRAP_PAYLOAD_HASH_REQUIRED");
+  if (!previousUser || !sessionActor) return reject("OWNER_BOOTSTRAP_ACTOR_REQUIRED");
+  const actorMatches = previousAccounts.filter((account) => account.id === previousUser.id);
+  if (actorMatches.length !== 1) return reject("OWNER_BOOTSTRAP_ACTOR_NOT_UNIQUE");
+  const actorRecord = actorMatches[0];
+  if (actorRecord.is_active === false
+    || actorRecord.role !== "admin"
+    || previousUser.id !== actorRecord.id
+    || previousUser.account !== actorRecord.account
+    || previousUser.role !== actorRecord.role
+    || sessionActor.id !== actorRecord.id
+    || sessionActor.account !== actorRecord.account
+    || sessionActor.role !== actorRecord.role) return reject("ACTOR_NOT_CURRENT_ACTIVE_ACCOUNT");
+  if (!hasAccountPermission(actorRecord, "edit_company_settings")) return reject("OWNER_BOOTSTRAP_COMPANY_PERMISSION_REQUIRED");
+  if (previousAccounts.filter((account) => account.role === "owner").length !== 0) return reject("OWNER_BOOTSTRAP_EXISTING_OWNER_RECORD");
+  if (restoredAccounts.some((account) => !ACCOUNT_ROLES.includes(account.role) || !account.password_hash)) {
+    return reject("OWNER_BOOTSTRAP_RESTORED_ACCOUNT_INVALID");
+  }
+  const restoredOwners = restoredAccounts.filter((account) => account.role === "owner");
+  if (restoredOwners.length !== 1) return reject("OWNER_BOOTSTRAP_OWNER_COUNT_INVALID");
+  const targetOwner = restoredOwners[0];
+  if (targetOwner.id !== actorRecord.id
+    || targetOwner.account !== actorRecord.account
+    || targetOwner.is_active === false
+    || !hasAccountPermission(targetOwner, "manage_accounts")
+    || !hasAccountPermission(targetOwner, "edit_company_settings")) return reject("OWNER_BOOTSTRAP_OWNER_MISMATCH");
+  const restoredActorMatches = restoredAccounts.filter((account) => account.id === actorRecord.id && account.account === actorRecord.account);
+  if (restoredActorMatches.length !== 1 || restoredActorMatches[0].role !== "owner") return reject("OWNER_BOOTSTRAP_ACTOR_MAPPING_INVALID");
+  if (!restoredAccounts.some((account) => ["owner", "admin"].includes(account.role) && account.is_active !== false)) {
+    return reject("OWNER_BOOTSTRAP_ACTIVE_MANAGER_REQUIRED");
+  }
+  return {
+    ok: true,
+    code: "",
+    actorRecord,
+    targetOwner,
+    payloadHash,
+    previousAccountsFingerprint,
+    previousOwnerCount: 0,
+    nextOwnerCount: 1,
+  };
+}
+
+function maskRestoreAccount(account) {
+  const value = String(account || "");
+  if (value.length <= 1) return "＊";
+  if (value.length === 2) return `${value[0]}＊`;
+  return `${value[0]}${"＊".repeat(Math.min(6, value.length - 2))}${value.at(-1)}`;
+}
+
+function confirmOwnerBootstrapRestore(eligibility, { bundle, file } = {}) {
+  return new Promise((resolve) => {
+    const actor = eligibility.actorRecord;
+    const owner = eligibility.targetOwner;
+    const backdrop = document.createElement("div");
+    backdrop.className = "approval-dialog-backdrop owner-bootstrap-restore-backdrop";
+    backdrop.dataset.ownerBootstrapRestoreDialog = "true";
+    backdrop.innerHTML = `
+      <section class="approval-dialog owner-bootstrap-restore-dialog" role="dialog" aria-modal="true" aria-labelledby="owner-bootstrap-restore-title">
+        <div class="approval-dialog-head">
+          <div>
+            <div class="approval-dialog-kicker">一次性最高權限還原</div>
+            <h2 id="owner-bootstrap-restore-title">高權限警告：將以備份建立首位老闆</h2>
+          </div>
+        </div>
+        <form class="owner-bootstrap-restore-form" novalidate>
+          <div class="approval-dialog-body">
+            <p class="owner-bootstrap-restore-warning">此瀏覽器目前沒有老闆帳號。你正以啟用中的管理員「${h(actor.name)}」操作。繼續後，已驗證網站自產備份中的同一帳號將成為唯一首位老闆，並以備份內容取代本瀏覽器的帳號、權限及全部營運資料。這是一次性最高權限建立流程。程式會先下載匯入前安全備份；若安全備份或任何寫入失敗，所有資料必須保持原狀。請確認你信任此備份，並立即設定新的老闆 PIN。</p>
+            <dl class="owner-bootstrap-restore-facts">
+              <div><dt>目前管理員</dt><dd>${h(actor.name)}／${h(maskRestoreAccount(actor.account))}<br><code>${h(actor.id)}</code></dd></div>
+              <div><dt>還原後唯一老闆</dt><dd>${h(owner.name)}／${h(maskRestoreAccount(owner.account))}<br><code>${h(owner.id)}</code></dd></div>
+              <div><dt>備份檔</dt><dd>${h(file.name)}</dd></div>
+              <div><dt>版本／資料格式</dt><dd>${h(bundle.app_version)}／schema ${h(bundle.manifest.state_schema_version)}</dd></div>
+              <div><dt>匯出時間</dt><dd>${h(bundle.exported_at)}</dd></div>
+              <div><dt>Payload SHA-256 末 12 碼</dt><dd><code>${h(eligibility.payloadHash.slice(-12))}</code></dd></div>
+              <div><dt>老闆帳號數</dt><dd>目前 0／還原後 1</dd></div>
+            </dl>
+            <p class="owner-bootstrap-restore-danger">老闆是最高權限。還原會替換帳號、角色、權限與 PIN hash；新老闆 PIN 將取代目前及備份中的 PIN。安全備份下載失敗時不會寫入任何資料。</p>
+            <label class="field"><span>目前管理員 PIN</span><input class="input" type="password" inputmode="numeric" autocomplete="current-password" name="current_pin" minlength="3" maxlength="20" required></label>
+            <label class="field"><span>新的老闆 PIN</span><input class="input" type="password" inputmode="numeric" autocomplete="new-password" name="new_owner_pin" minlength="3" maxlength="20" required></label>
+            <label class="field"><span>再次輸入新的老闆 PIN</span><input class="input" type="password" inputmode="numeric" autocomplete="new-password" name="confirm_owner_pin" minlength="3" maxlength="20" required></label>
+            <label class="field"><span>手動輸入「${OWNER_BOOTSTRAP_RESTORE_CONFIRMATION}」</span><input class="input" type="text" autocomplete="off" name="confirmation_phrase" required></label>
+            <div class="approval-error" role="alert" hidden></div>
+          </div>
+          <div class="approval-dialog-actions">
+            <button class="btn secondary" type="button" data-owner-bootstrap-cancel>取消</button>
+            <button class="btn danger" type="button" data-owner-bootstrap-confirm>確認建立首位老闆並還原</button>
+          </div>
+        </form>
+      </section>`;
+    document.body.appendChild(backdrop);
+    const form = backdrop.querySelector("form");
+    const cancelButton = backdrop.querySelector("[data-owner-bootstrap-cancel]");
+    const confirmButton = backdrop.querySelector("[data-owner-bootstrap-confirm]");
+    const errorBox = backdrop.querySelector(".approval-error");
+    let settled = false;
+    const clearPinInputs = () => {
+      ["current_pin", "new_owner_pin", "confirm_owner_pin"].forEach((name) => {
+        const input = form.elements.namedItem(name);
+        if (input) input.value = "";
+      });
+    };
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearPinInputs();
+      const phraseInput = form.elements.namedItem("confirmation_phrase");
+      if (phraseInput) phraseInput.value = "";
+      backdrop.remove();
+      resolve(result);
+    };
+    const showError = (message) => {
+      errorBox.textContent = message;
+      errorBox.hidden = false;
+      confirmButton.disabled = false;
+      clearPinInputs();
+      form.elements.namedItem("current_pin")?.focus();
+    };
+    form.addEventListener("submit", (event) => event.preventDefault());
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") event.preventDefault();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        finish({ confirmed: false, code: "OWNER_BOOTSTRAP_CANCELLED" });
+      }
+    });
+    cancelButton.addEventListener("click", () => finish({ confirmed: false, code: "OWNER_BOOTSTRAP_CANCELLED" }));
+    confirmButton.addEventListener("click", async () => {
+      confirmButton.disabled = true;
+      errorBox.hidden = true;
+      const currentPin = String(form.elements.namedItem("current_pin")?.value || "");
+      const newPin = String(form.elements.namedItem("new_owner_pin")?.value || "");
+      const repeatedPin = String(form.elements.namedItem("confirm_owner_pin")?.value || "");
+      const confirmationPhrase = String(form.elements.namedItem("confirmation_phrase")?.value || "");
+      try {
+        if (confirmationPhrase !== OWNER_BOOTSTRAP_RESTORE_CONFIRMATION) {
+          showError(`請完整輸入「${OWNER_BOOTSTRAP_RESTORE_CONFIRMATION}」`);
+          return;
+        }
+        if (!(await verifyAccountPassword(actor, currentPin))) {
+          showError("目前管理員 PIN 驗證失敗");
+          return;
+        }
+        if (!MaterialsQuoteDomain.isNumericCredential(newPin)) {
+          showError("新的老闆 PIN 必須是 3 至 20 位數字");
+          return;
+        }
+        if (newPin !== repeatedPin) {
+          showError("兩次輸入的新老闆 PIN 不一致");
+          return;
+        }
+        const currentPinHash = await hashNumericPin(currentPin);
+        const newPinHash = await hashNumericPin(newPin);
+        if (newPinHash === currentPinHash || newPinHash === owner.password_hash) {
+          showError("新的老闆 PIN 必須不同於目前及備份中的 PIN");
+          return;
+        }
+        finish({
+          confirmed: true,
+          code: "",
+          newPinHash,
+          confirmedAt: new Date().toISOString(),
+          method: "目前PIN驗證＋新PIN雙次＋固定確認字串",
+        });
+      } catch (error) {
+        showError("高權限確認失敗，請重新輸入");
+      }
+    });
+    window.requestAnimationFrame(() => cancelButton.focus());
+  });
+}
+
+function applyAuthorizedOwnerPinRotation(restoredAccounts, actorId, newPinHash) {
+  return normalizedAccountsForRestore(restoredAccounts).map((account) => {
+    if (account.id !== actorId) return account;
+    const rotated = { ...account, password_hash: newPinHash };
+    delete rotated.password;
+    return rotated;
+  });
+}
+
+async function rollbackFailedRestore({ storageSnapshot, memorySnapshot, safetyBugReports, previousUser }) {
+  const failures = [];
+  if (safetyBugReports !== undefined && typeof BugReportStore !== "undefined") {
+    try {
+      const bugRollback = await BugReportStore.importFromBackup(safetyBugReports, previousUser);
+      if (!bugRollback.ok) failures.push(bugRollback.code || "BUG_ROLLBACK_FAILED");
+    } catch (error) {
+      failures.push("BUG_ROLLBACK_FAILED");
+    }
+  }
+  try {
+    rollbackRestoreStorage(storageSnapshot);
+  } catch (error) {
+    failures.push("STORAGE_ROLLBACK_FAILED");
+  }
+  rollbackRestoreMemory(memorySnapshot);
+  try {
+    const currentStorage = await captureRestoreStorage();
+    if (currentStorage.fingerprint !== storageSnapshot.fingerprint) failures.push("STORAGE_ROLLBACK_MISMATCH");
+  } catch (error) {
+    failures.push("STORAGE_ROLLBACK_UNVERIFIED");
+  }
+  if (safetyBugReports !== undefined && typeof BugReportStore !== "undefined") {
+    try {
+      const currentBugReports = await BugReportStore.exportForBackup();
+      if (!currentBugReports.ok
+        || MaterialsQuoteDomain.canonicalStringify(currentBugReports.value) !== MaterialsQuoteDomain.canonicalStringify(safetyBugReports)) {
+        failures.push("BUG_ROLLBACK_MISMATCH");
+      }
+    } catch (error) {
+      failures.push("BUG_ROLLBACK_UNVERIFIED");
+    }
+  }
+  return { ok: failures.length === 0, failures };
+}
+
+async function validateRestorePostCommit({
+  bundle,
+  restoredState,
+  restoredAccounts,
+  restoredUser,
+  auditEntry,
+  ownerBootstrapExpectation,
+} = {}) {
+  const storedState = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+  if (MaterialsQuoteDomain.canonicalStringify(storedState) !== MaterialsQuoteDomain.canonicalStringify(restoredState)) {
+    throw new Error("RESTORE_STATE_POSTCHECK_FAILED");
+  }
+  const storedAccounts = JSON.parse(localStorage.getItem(ACCOUNTS_KEY) || "[]");
+  if (MaterialsQuoteDomain.canonicalStringify(storedAccounts) !== MaterialsQuoteDomain.canonicalStringify(restoredAccounts)) {
+    throw new Error("RESTORE_ACCOUNTS_POSTCHECK_FAILED");
+  }
+  const logs = JSON.parse(localStorage.getItem(WORK_LOGS_KEY) || "[]");
+  const expectedLogCount = Math.min(WORK_LOG_LIMIT, bundle.data.work_logs.length + 1);
+  if (logs.length !== expectedLogCount || !logs.some((entry) => entry.id === auditEntry?.id && entry.action === "restore")) {
+    throw new Error("RESTORE_AUDIT_POSTCHECK_FAILED");
+  }
+  if (restoredUser && restoredUser.is_active !== false) {
+    const session = readRestoreSessionActor();
+    if (!session
+      || session.id !== restoredUser.id
+      || session.account !== restoredUser.account
+      || session.role !== restoredUser.role) throw new Error("RESTORE_SESSION_POSTCHECK_FAILED");
+  } else if (localStorage.getItem(AUTH_KEY) || localStorage.getItem(AUTH_USER_KEY)) {
+    throw new Error("RESTORE_SESSION_CLEAR_FAILED");
+  }
+  if (Object.keys(localStorage).some((key) => key === QUOTE_DRAFT_KEY || key.startsWith(`${QUOTE_DRAFT_KEY}:`))) {
+    throw new Error("RESTORE_DRAFT_CLEAR_FAILED");
+  }
+  if (bundle.data.bug_reports !== undefined && typeof BugReportStore !== "undefined") {
+    const restoredBugReports = await BugReportStore.exportForBackup();
+    if (!restoredBugReports.ok
+      || MaterialsQuoteDomain.canonicalStringify(restoredBugReports.value) !== MaterialsQuoteDomain.canonicalStringify(bundle.data.bug_reports)) {
+      throw new Error("RESTORE_BUG_REPORT_POSTCHECK_FAILED");
+    }
+  }
+  if (Object.keys(localStorage).some((key) => /bootstrap|restore.*author/i.test(key))) {
+    throw new Error("RESTORE_AUTHORIZATION_PERSISTED");
+  }
+  if (ownerBootstrapExpectation) {
+    const owners = storedAccounts.filter((account) => account.role === "owner");
+    if (owners.length !== 1
+      || owners[0].id !== ownerBootstrapExpectation.ownerId
+      || owners[0].account !== ownerBootstrapExpectation.ownerAccount
+      || owners[0].is_active === false) throw new Error("OWNER_BOOTSTRAP_POSTCHECK_FAILED");
+  }
+}
+
+window.exportDataBackup = async function (suffix = "") {
+  const accounts = readRestoreAccountsWithoutWrite();
+  const actor = readRestoreCurrentActor(accounts);
+  if (!actor || !hasAccountPermission(actor, "edit_company_settings")) {
+    showBackupDownloadToastWithoutRender("只有具備公司設定權限的人員可以下載完整備份");
+    return null;
+  }
+  let bundle;
+  try {
+    bundle = await createCurrentBackupBundle({ accounts });
+  } catch (error) {
+    showBackupDownloadToastWithoutRender(`備份未建立：${error instanceof Error ? error.message : "資料驗證失敗"}`);
+    return null;
+  }
+  const downloadResult = await downloadBackupBundle(bundle, suffix);
+  if (!downloadResult.ok) {
+    showBackupDownloadToastWithoutRender("備份下載要求失敗，未建立下載");
+    return null;
+  }
+  showBackupDownloadToastWithoutRender("已送出下載要求，請確認瀏覽器下載清單");
   return bundle;
 };
 
 window.importDataBackup = async function (event) {
   const input = event.currentTarget;
-  if (!requirePermission("edit_company_settings", "只有具備公司設定權限的人員可以還原完整備份")) {
+  if (dataBackupRestoreInProgress) {
+    setToast("另一個備份還原流程仍在進行，請稍後再試");
     input.value = "";
-    return;
+    return { ok: false, code: "RESTORE_ALREADY_IN_PROGRESS" };
+  }
+  const initialRestoreAccounts = readRestoreAccountsWithoutWrite();
+  const initialRestoreActor = readRestoreCurrentActor(initialRestoreAccounts);
+  if (!initialRestoreActor || !hasAccountPermission(initialRestoreActor, "edit_company_settings")) {
+    setToast("只有具備公司設定權限的人員可以還原完整備份");
+    input.value = "";
+    return { ok: false, code: "RESTORE_PERMISSION_DENIED" };
   }
   const file = input.files?.[0];
-  if (!file) return;
-  let bundle = null;
+  if (!file) return { ok: false, code: "RESTORE_FILE_REQUIRED" };
+  if (!navigator.locks?.request) {
+    setToast("目前瀏覽器不支援安全還原鎖，已拒絕還原");
+    input.value = "";
+    return { ok: false, code: "RESTORE_LOCK_UNAVAILABLE" };
+  }
+  let releaseBrowserRestoreLock = null;
+  let browserRestoreLockTask = null;
+  let browserRestoreLockAcquired = false;
   try {
-    bundle = JSON.parse(await file.text());
-  } catch (error) {
-    setToast("備份檔不是有效的 JSON 格式");
-    input.value = "";
-    return;
-  }
-  const validation = await MaterialsQuoteDomain.validateBackupBundle(bundle);
-  if (!validation.ok) {
-    setToast(validation.error);
-    input.value = "";
-    return;
-  }
-  const restoreContext = validation.restoreContext || { channel: "external", source: "external_import", trustExistingHistoricalData: false };
-  const stateValidation = MaterialsQuoteDomain.validateAppStateForImport(bundle.data.state, restoreContext);
-  if (!stateValidation.ok) {
-    setToast(`備份未匯入：${stateValidation.errors[0]}`);
-    input.value = "";
-    return;
-  }
-  let restoredState;
-  try {
-    restoredState = normalizeAppState(bundle.data.state, restoreContext);
-  } catch (error) {
-    setToast(`備份未匯入：${error instanceof Error ? error.message : "資料遷移失敗"}`);
-    input.value = "";
-    return;
-  }
-  const invalidMaterial = restoredState.materials.find((material) => !MaterialsQuoteDomain.validateMaterialForPersistence(material).ok);
-  if (invalidMaterial) {
-    setToast(`備份中的材料「${invalidMaterial.name || invalidMaterial.id || "未命名"}」含無效公式或價格來源，已取消還原`);
-    input.value = "";
-    return;
-  }
-  let importQuoteError = "";
-  if (validation.channel === "self_backup") {
-    if (MaterialsQuoteDomain.canonicalStringify(restoredState) !== MaterialsQuoteDomain.canonicalStringify(bundle.data.state)) {
-      const mismatch = Object.keys({ ...bundle.data.state, ...restoredState }).sort().find((key) => (
-        MaterialsQuoteDomain.canonicalStringify(restoredState[key]) !== MaterialsQuoteDomain.canonicalStringify(bundle.data.state[key])
-      ));
-      let mismatchDetail = mismatch || "";
-      if (mismatch && Array.isArray(restoredState[mismatch]) && Array.isArray(bundle.data.state[mismatch])) {
-        const index = restoredState[mismatch].findIndex((record, recordIndex) => (
-          MaterialsQuoteDomain.canonicalStringify(record) !== MaterialsQuoteDomain.canonicalStringify(bundle.data.state[mismatch][recordIndex])
-        ));
-        if (index >= 0) {
-          const restoredRecord = restoredState[mismatch][index] || {};
-          const sourceRecord = bundle.data.state[mismatch][index] || {};
-          const field = Object.keys({ ...sourceRecord, ...restoredRecord }).sort().find((key) => (
-            MaterialsQuoteDomain.canonicalStringify(restoredRecord[key]) !== MaterialsQuoteDomain.canonicalStringify(sourceRecord[key])
-          ));
-          mismatchDetail = `${mismatch}[${index}]${field ? `.${field}` : ""}`;
+    browserRestoreLockAcquired = await new Promise((resolve, reject) => {
+      browserRestoreLockTask = navigator.locks.request(DATA_BACKUP_RESTORE_LOCK, { mode: "exclusive", ifAvailable: true }, async (lock) => {
+        if (!lock) {
+          resolve(false);
+          return;
         }
-      }
-      importQuoteError = `自產備份還原結果與 canonical payload 不一致${mismatchDetail ? `（${mismatchDetail}）` : ""}`;
-    }
-  } else {
-    restoredState.quotes = restoredState.quotes.map((quote) => {
-      if (quoteIsLocked(quote)) return quote;
-      const sanitized = MaterialsQuoteDomain.sanitizeQuoteForPersistence(quote, quote, restoredState.materials, {
-        canEditPricing: true,
-        allowStatusSanitize: true,
-        trustProtectedFields: false,
-        allowVerifiedCatalogMappings: true,
-      });
-      if (sanitized.validationErrors.length && !importQuoteError) importQuoteError = sanitized.validationErrors[0];
-      return normalizeQuoteRecord(sanitized.quote, restoredState.materials);
+        await new Promise((release) => {
+          releaseBrowserRestoreLock = release;
+          resolve(true);
+        });
+      }).catch(reject);
     });
-  }
-  if (importQuoteError) {
-    setToast(`備份未匯入：${importQuoteError}`);
-    input.value = "";
-    return;
-  }
-  if (!confirm(`還原會以${validation.channel === "self_backup" ? "已驗證的網站自產備份" : "外部匯入內容"}取代目前瀏覽器內的全部資料，確定繼續嗎？`)) {
-    input.value = "";
-    return;
-  }
-  const storageSnapshot = captureRestoreStorage();
-  const previousState = state;
-  const previousUser = currentUser();
-  if (!Array.isArray(bundle.data.accounts) || bundle.data.accounts.some((account) => !ACCOUNT_ROLES.includes(account?.role))) {
-    setToast("備份帳號角色無效，還原已拒絕");
-    input.value = "";
-    return;
-  }
-  const restoredAccounts = bundle.data.accounts.map(normalizeAccountRecord);
-  const accountGuard = validateAccountMutation({
-    actor: previousUser,
-    previousAccounts: loadAccounts(),
-    nextAccounts: restoredAccounts,
-    targetId: previousUser?.id || "",
-  });
-  if (!accountGuard.ok) {
-    setToast("備份包含未授權的帳號或角色變更，還原已拒絕");
-    input.value = "";
-    return;
-  }
-  const restoredUser = previousUser
-    ? restoredAccounts.find((account) => account.id === previousUser.id || account.account === previousUser.account)
-    : null;
-  try {
-    const safetyBundle = await createCurrentBackupBundle();
-    downloadBackupBundle(safetyBundle, "before-import");
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(restoredState));
-    if (!saveAccounts(restoredAccounts, { actor: previousUser, previousAccounts: loadAccounts(), targetId: previousUser?.id || "" })) {
-      throw new Error("ACCOUNT_GUARD_REJECTED");
-    }
-    saveWorkLogs(bundle.data.work_logs);
-    if (bundle.data.bug_reports && typeof BugReportStore !== "undefined") {
-      const restoredBugReports = await BugReportStore.importFromBackup(bundle.data.bug_reports, previousUser);
-      if (!restoredBugReports.ok) throw new Error(restoredBugReports.code);
-    }
-    state = restoredState;
-    if (restoredUser?.is_active) setAuthSession(restoredUser);
-    else clearAuthSession();
-    clearAllStoredQuoteDrafts();
-    logWorkEvent("restore", "還原完整資料備份", { entityType: "settings", detail: `來源檔案：${file.name}` });
   } catch (error) {
-    state = previousState;
-    try {
-      rollbackRestoreStorage(storageSnapshot);
-    } catch (rollbackError) {
-      console.error(rollbackError);
-    }
-    setToast(`備份還原失敗，原資料已保留：${error instanceof Error ? error.message : "寫入失敗"}`);
+    setToast("無法取得安全還原鎖，已拒絕還原");
     input.value = "";
-    return;
+    return { ok: false, code: "RESTORE_LOCK_FAILED" };
   }
-  input.value = "";
-  go(restoredUser?.is_active ? "/dashboard" : "/login");
-  setToast("備份已還原");
+  if (!browserRestoreLockAcquired) {
+    setToast("另一個備份還原流程仍在進行，請稍後再試");
+    input.value = "";
+    return { ok: false, code: "RESTORE_ALREADY_IN_PROGRESS" };
+  }
+  const selectedFileIdentity = restoreFileIdentity(file);
+  dataBackupRestoreInProgress = true;
+  let bootstrapConfirmed = false;
+  try {
+    let bundle = null;
+    try {
+      bundle = JSON.parse(await file.text());
+    } catch (error) {
+      setToast("備份檔不是有效的 JSON 格式");
+      return { ok: false, code: "RESTORE_JSON_INVALID" };
+    }
+    const validation = await MaterialsQuoteDomain.validateBackupBundle(bundle);
+    if (!validation.ok) {
+      setToast(validation.error);
+      return { ok: false, code: "RESTORE_BUNDLE_INVALID" };
+    }
+    const restoreContext = validation.restoreContext || { channel: "external", source: "external_import", trustExistingHistoricalData: false };
+    const stateValidation = MaterialsQuoteDomain.validateAppStateForImport(bundle.data.state, restoreContext);
+    if (!stateValidation.ok) {
+      setToast(`備份未匯入：${stateValidation.errors[0]}`);
+      return { ok: false, code: "RESTORE_STATE_INVALID" };
+    }
+    let restoredState;
+    try {
+      restoredState = normalizeAppState(bundle.data.state, restoreContext);
+    } catch (error) {
+      setToast(`備份未匯入：${error instanceof Error ? error.message : "資料遷移失敗"}`);
+      return { ok: false, code: "RESTORE_STATE_MIGRATION_FAILED" };
+    }
+    const invalidMaterial = restoredState.materials.find((material) => !MaterialsQuoteDomain.validateMaterialForPersistence(material).ok);
+    if (invalidMaterial) {
+      setToast(`備份中的材料「${invalidMaterial.name || invalidMaterial.id || "未命名"}」含無效公式或價格來源，已取消還原`);
+      return { ok: false, code: "RESTORE_MATERIAL_INVALID" };
+    }
+    let importQuoteError = "";
+    if (validation.channel === "self_backup") {
+      if (MaterialsQuoteDomain.canonicalStringify(restoredState) !== MaterialsQuoteDomain.canonicalStringify(bundle.data.state)) {
+        const mismatch = Object.keys({ ...bundle.data.state, ...restoredState }).sort().find((key) => (
+          MaterialsQuoteDomain.canonicalStringify(restoredState[key]) !== MaterialsQuoteDomain.canonicalStringify(bundle.data.state[key])
+        ));
+        let mismatchDetail = mismatch || "";
+        if (mismatch && Array.isArray(restoredState[mismatch]) && Array.isArray(bundle.data.state[mismatch])) {
+          const index = restoredState[mismatch].findIndex((record, recordIndex) => (
+            MaterialsQuoteDomain.canonicalStringify(record) !== MaterialsQuoteDomain.canonicalStringify(bundle.data.state[mismatch][recordIndex])
+          ));
+          if (index >= 0) {
+            const restoredRecord = restoredState[mismatch][index] || {};
+            const sourceRecord = bundle.data.state[mismatch][index] || {};
+            const field = Object.keys({ ...sourceRecord, ...restoredRecord }).sort().find((key) => (
+              MaterialsQuoteDomain.canonicalStringify(restoredRecord[key]) !== MaterialsQuoteDomain.canonicalStringify(sourceRecord[key])
+            ));
+            mismatchDetail = `${mismatch}[${index}]${field ? `.${field}` : ""}`;
+          }
+        }
+        importQuoteError = `自產備份還原結果與 canonical payload 不一致${mismatchDetail ? `（${mismatchDetail}）` : ""}`;
+      }
+    } else {
+      restoredState.quotes = restoredState.quotes.map((quote) => {
+        if (quoteIsLocked(quote)) return quote;
+        const sanitized = MaterialsQuoteDomain.sanitizeQuoteForPersistence(quote, quote, restoredState.materials, {
+          canEditPricing: true,
+          allowStatusSanitize: true,
+          trustProtectedFields: false,
+          allowVerifiedCatalogMappings: true,
+        });
+        if (sanitized.validationErrors.length && !importQuoteError) importQuoteError = sanitized.validationErrors[0];
+        return normalizeQuoteRecord(sanitized.quote, restoredState.materials);
+      });
+    }
+    if (importQuoteError) {
+      setToast(`備份未匯入：${importQuoteError}`);
+      return { ok: false, code: "RESTORE_CANONICAL_STATE_MISMATCH" };
+    }
+    if (!confirm(`還原會以${validation.channel === "self_backup" ? "已驗證的網站自產備份" : "外部匯入內容"}取代目前瀏覽器內的全部資料，確定繼續嗎？`)) {
+      return { ok: false, code: "RESTORE_CANCELLED" };
+    }
+    if (!Array.isArray(bundle.data.accounts) || bundle.data.accounts.some((account) => !ACCOUNT_ROLES.includes(account?.role))) {
+      setToast("備份帳號角色無效，還原已拒絕");
+      return { ok: false, code: "RESTORE_ACCOUNT_ROLE_INVALID" };
+    }
+    const previousSessionActor = readRestoreSessionActor();
+    const previousAccounts = readRestoreAccountsWithoutWrite();
+    const previousUser = readRestoreCurrentActor(previousAccounts, previousSessionActor);
+    const previousAccountsFingerprint = await restoreCanonicalHash(previousAccounts);
+    let restoredAccounts = normalizedAccountsForRestore(bundle.data.accounts);
+    let accountGuard = validateAccountMutation({
+      actor: previousUser,
+      previousAccounts,
+      nextAccounts: restoredAccounts,
+      targetId: previousUser?.id || "",
+      bootstrapConfirmed: false,
+    });
+    let eligibility = null;
+    let approval = null;
+    const ownerContinuity = validateRestoreOwnerContinuity({
+      actor: previousUser,
+      previousAccounts,
+      restoredAccounts,
+    });
+    if (!ownerContinuity.ok) {
+      setToast("備份包含未授權的既有老闆異動，還原已拒絕");
+      return { ok: false, code: ownerContinuity.code };
+    }
+    if (ownerContinuity.bootstrapRequired) {
+      if (accountGuard.ok || accountGuard.code !== "OWNER_BOOTSTRAP_REQUIRED") {
+        setToast("備份中的首位老闆不是目前登入的管理員，還原已拒絕");
+        return { ok: false, code: "OWNER_BOOTSTRAP_GUARD_MISMATCH" };
+      }
+      eligibility = evaluateOwnerBootstrapRestoreEligibility({
+        validation,
+        restoreContext,
+        stateValidation,
+        bundle,
+        restoredState,
+        sessionActor: previousSessionActor,
+        previousUser,
+        previousAccounts,
+        previousAccountsFingerprint,
+        restoredAccounts,
+      });
+      if (!eligibility.ok) {
+        setToast("此備份不符合建立首位老闆的安全條件，還原已拒絕");
+        return { ok: false, code: eligibility.code };
+      }
+      approval = await confirmOwnerBootstrapRestore(eligibility, { bundle, file });
+      bootstrapConfirmed = approval.confirmed === true;
+      if (!bootstrapConfirmed) return { ok: false, code: approval.code || "OWNER_BOOTSTRAP_CANCELLED" };
+      restoredAccounts = applyAuthorizedOwnerPinRotation(restoredAccounts, previousUser.id, approval.newPinHash);
+    } else if (!accountGuard.ok) {
+      if (accountGuard.code === "OWNER_BOOTSTRAP_REQUIRED") {
+        setToast("帳號變更要求不適用的首位老闆授權，還原已拒絕");
+        return { ok: false, code: "OWNER_BOOTSTRAP_UNEXPECTED" };
+      } else {
+        setToast("備份包含未授權的帳號或角色變更，還原已拒絕");
+        return { ok: false, code: accountGuard.code || "RESTORE_ACCOUNT_GUARD_REJECTED" };
+      }
+    }
+
+    const recheckRestoreBindings = async () => {
+      if (!restoreFileIsStillSelected(input, file, selectedFileIdentity)) return { ok: false, code: "RESTORE_FILE_CHANGED" };
+      const revalidation = await MaterialsQuoteDomain.validateBackupBundle(bundle);
+      if (!revalidation.ok
+        || revalidation.channel !== validation.channel
+        || String(bundle.manifest?.canonical_payload?.sha256 || "") !== String(eligibility?.payloadHash || bundle.manifest?.canonical_payload?.sha256 || "")) {
+        return { ok: false, code: "RESTORE_PAYLOAD_CHANGED" };
+      }
+      const currentSessionActor = readRestoreSessionActor();
+      const currentAccounts = readRestoreAccountsWithoutWrite();
+      const currentActor = readRestoreCurrentActor(currentAccounts, currentSessionActor);
+      if ((await restoreCanonicalHash(currentAccounts)) !== previousAccountsFingerprint) return { ok: false, code: "ACCOUNT_STATE_CHANGED" };
+      if (!currentActor
+        || currentActor.id !== previousUser?.id
+        || currentActor.account !== previousUser?.account
+        || currentActor.role !== previousUser?.role
+        || currentSessionActor?.id !== previousSessionActor?.id
+        || currentSessionActor?.account !== previousSessionActor?.account
+        || currentSessionActor?.role !== previousSessionActor?.role) return { ok: false, code: "ACTOR_STATE_CHANGED" };
+      if (bootstrapConfirmed) {
+        const repeatedEligibility = evaluateOwnerBootstrapRestoreEligibility({
+          validation: revalidation,
+          restoreContext: revalidation.restoreContext,
+          stateValidation,
+          bundle,
+          restoredState,
+          sessionActor: currentSessionActor,
+          previousUser: currentActor,
+          previousAccounts: currentAccounts,
+          previousAccountsFingerprint,
+          restoredAccounts: normalizedAccountsForRestore(bundle.data.accounts),
+        });
+        if (!repeatedEligibility.ok
+          || repeatedEligibility.actorRecord.id !== eligibility.actorRecord.id
+          || repeatedEligibility.targetOwner.id !== eligibility.targetOwner.id
+          || repeatedEligibility.payloadHash !== eligibility.payloadHash) return { ok: false, code: repeatedEligibility.code || "OWNER_BOOTSTRAP_BINDING_CHANGED" };
+      }
+      return { ok: true, code: "", currentActor, currentAccounts };
+    };
+
+    let bindingCheck = await recheckRestoreBindings();
+    if (!bindingCheck.ok) {
+      setToast("確認期間帳號、登入狀態、備份檔或 payload 已變更，請重新開始還原");
+      return bindingCheck;
+    }
+    const memorySnapshot = captureRestoreMemory();
+    const storageSnapshot = await captureRestoreStorage();
+    let safetyBundle;
+    try {
+      safetyBundle = await createCurrentBackupBundle({
+        state: memorySnapshot.state,
+        accounts: previousAccounts,
+        workLogs: loadWorkLogs(),
+      });
+      const safetyDownload = await downloadBackupBundle(safetyBundle, "before-import");
+      if (!safetyDownload.ok) throw new Error(safetyDownload.code);
+    } catch (error) {
+      const unchanged = (await captureRestoreStorage()).fingerprint === storageSnapshot.fingerprint;
+      setToast(unchanged ? "匯入前安全備份未能下載，未寫入任何資料" : "嚴重錯誤：安全備份失敗且目前資料已發生變化");
+      return { ok: false, code: unchanged ? "RESTORE_SAFETY_BACKUP_FAILED" : "RESTORE_SAFETY_BACKUP_STATE_CHANGED" };
+    }
+    if ((await captureRestoreStorage()).fingerprint !== storageSnapshot.fingerprint) {
+      setToast("安全備份下載期間資料已變更，未執行還原；請重新選擇備份檔");
+      return { ok: false, code: "RESTORE_STORAGE_STATE_CHANGED" };
+    }
+    bindingCheck = await recheckRestoreBindings();
+    if (!bindingCheck.ok) {
+      setToast("安全備份後帳號、登入狀態、備份檔或 payload 已變更，未執行還原");
+      return bindingCheck;
+    }
+    accountGuard = validateAccountMutation({
+      actor: previousUser,
+      previousAccounts,
+      nextAccounts: restoredAccounts,
+      targetId: previousUser?.id || "",
+      bootstrapConfirmed,
+    });
+    if (!accountGuard.ok) {
+      setToast("備份帳號未通過最終安全檢查，未執行還原");
+      return { ok: false, code: accountGuard.code || "RESTORE_FINAL_ACCOUNT_GUARD_REJECTED" };
+    }
+    const restoredUser = previousUser
+      ? restoredAccounts.find((account) => account.id === previousUser.id && account.account === previousUser.account)
+        || (!bootstrapConfirmed ? restoredAccounts.find((account) => account.account === previousUser.account) : null)
+      : null;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(restoredState));
+      if (!saveAccounts(restoredAccounts, {
+        actor: previousUser,
+        previousAccounts,
+        targetId: previousUser?.id || "",
+        bootstrapConfirmed,
+      })) throw new Error("ACCOUNT_GUARD_REJECTED");
+      saveWorkLogs(bundle.data.work_logs);
+      if (bundle.data.bug_reports !== undefined) {
+        if (typeof BugReportStore === "undefined") throw new Error("BUG_REPORT_STORE_UNAVAILABLE");
+        const restoredBugReports = await BugReportStore.importFromBackup(bundle.data.bug_reports, previousUser);
+        if (!restoredBugReports.ok) throw new Error(restoredBugReports.code);
+      }
+      state = restoredState;
+      if (restoredUser?.is_active) setAuthSession(restoredUser);
+      else clearAuthSession();
+      clearAllStoredQuoteDrafts();
+      const auditEntry = bootstrapConfirmed
+        ? logWorkEvent("restore", "還原完整資料備份（建立首位老闆）", {
+          actor: previousUser,
+          entityType: "settings",
+          entityId: restoredUser?.id || "",
+          entityName: restoredUser?.name || "",
+          detail: [
+            "owner_bootstrap=true",
+            `來源檔案：${file.name}`,
+            `備份 schema：${bundle.schema}`,
+            `app version：${bundle.app_version}`,
+            `canonical payload SHA-256：${eligibility.payloadHash}`,
+            `actor ID：${previousUser.id}（admin）`,
+            `target owner ID：${restoredUser.id}（owner）`,
+            "previous_owner_count=0",
+            "next_owner_count=1",
+            `二次確認：${approval.confirmedAt}／${approval.method}`,
+            "pin_rotated=true",
+            "before_import_backup_triggered=true",
+          ].join("；"),
+        })
+        : logWorkEvent("restore", "還原完整資料備份", {
+          actor: previousUser,
+          entityType: "settings",
+          detail: `來源檔案：${file.name}`,
+        });
+      await validateRestorePostCommit({
+        bundle,
+        restoredState,
+        restoredAccounts,
+        restoredUser,
+        auditEntry,
+        ownerBootstrapExpectation: eligibility ? {
+          ownerId: eligibility.targetOwner.id,
+          ownerAccount: eligibility.targetOwner.account,
+        } : null,
+      });
+    } catch (error) {
+      const rollback = await rollbackFailedRestore({
+        storageSnapshot,
+        memorySnapshot,
+        safetyBugReports: safetyBundle.data.bug_reports,
+        previousUser,
+      });
+      if (!rollback.ok) {
+        console.error("RESTORE_ROLLBACK_INTEGRITY_FAILURE", rollback.failures);
+        setToast("嚴重錯誤：備份還原失敗，且原資料完整性無法確認；請停止操作並保留匯入前安全備份");
+        return { ok: false, code: "RESTORE_ROLLBACK_INTEGRITY_FAILURE" };
+      }
+      setToast(`備份還原失敗，原資料已完整復原：${error instanceof Error ? error.message : "寫入失敗"}`);
+      return { ok: false, code: "RESTORE_COMMIT_FAILED" };
+    }
+    go(restoredUser?.is_active ? "/dashboard" : "/login");
+    setToast("備份已還原");
+    return { ok: true, code: "" };
+  } finally {
+    bootstrapConfirmed = false;
+    dataBackupRestoreInProgress = false;
+    input.value = "";
+    if (releaseBrowserRestoreLock) releaseBrowserRestoreLock();
+    if (browserRestoreLockTask) await browserRestoreLockTask.catch(() => undefined);
+  }
 };
 
 window.saveSettings = function (event) {

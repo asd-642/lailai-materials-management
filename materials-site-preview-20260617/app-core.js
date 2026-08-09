@@ -519,7 +519,7 @@ function clearLoginFailures(account) {
   localStorage.setItem(LOGIN_ATTEMPTS_KEY, JSON.stringify(attempts));
 }
 
-function loadAccounts() {
+function loadAccounts(options = {}) {
   let accounts = null;
   try {
     const saved = localStorage.getItem(ACCOUNTS_KEY);
@@ -527,10 +527,16 @@ function loadAccounts() {
   } catch (error) {
     console.warn(error);
   }
-  if (!Array.isArray(accounts) || !accounts.length) accounts = defaultAccounts();
+  if (!Array.isArray(accounts) || !accounts.length) {
+    if (options.fallbackToDefaults === false) return [];
+    accounts = defaultAccounts();
+  }
   accounts = accounts.map(normalizeAccountRecord).filter((account) => account.account);
-  if (!accounts.length) accounts = defaultAccounts();
-  saveAccounts(accounts);
+  if (!accounts.length) {
+    if (options.fallbackToDefaults === false) return [];
+    accounts = defaultAccounts();
+  }
+  if (options.persistMigration !== false) saveAccounts(accounts, { allowReadOnlyMigration: true });
   return accounts;
 }
 
@@ -564,31 +570,34 @@ function saveAccounts(accounts, options = {}) {
   return true;
 }
 
-function accountById(accountId) {
-  return loadAccounts().find((account) => account.id === accountId);
+function accountById(accountId, options = {}) {
+  return loadAccounts(options).find((account) => account.id === accountId);
 }
 
-function currentUser() {
+function currentUser(options = {}) {
+  const readOnly = options.readOnly === true;
+  const accountReadOptions = readOnly ? { persistMigration: false, fallbackToDefaults: false } : {};
   if (!isAuthed()) return null;
   try {
     const saved = localStorage.getItem(AUTH_USER_KEY);
     if (saved) {
       const user = normalizeAccountRecord(JSON.parse(saved));
-      const latest = accountById(user.id) || loadAccounts().find((account) => account.account === user.account);
+      const latest = accountById(user.id, accountReadOptions)
+        || loadAccounts(accountReadOptions).find((account) => account.account === user.account);
       if (latest && latest.is_active) return latest;
       if (latest && !latest.is_active) {
-        clearAuthSession();
+        if (!readOnly) clearAuthSession();
         return null;
       }
       if (!latest) {
-        clearAuthSession();
+        if (!readOnly) clearAuthSession();
         return null;
       }
     }
   } catch (error) {
     console.warn(error);
   }
-  clearAuthSession();
+  if (!readOnly) clearAuthSession();
   return null;
 }
 
