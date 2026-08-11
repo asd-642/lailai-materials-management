@@ -2390,6 +2390,222 @@ function readRestoreCurrentActor(accounts, sessionActor = readRestoreSessionActo
   return actor.is_active !== false && actor.role === sessionActor.role ? actor : null;
 }
 
+function readAuthoritativeSyncConfiguration() {
+  const source = typeof window.MaterialsQuoteSupabaseRuntime?.getSyncConfiguration === "function"
+    ? window.MaterialsQuoteSupabaseRuntime.getSyncConfiguration()
+    : window.MaterialsQuoteSupabaseSyncConfig;
+  if (!source || typeof source !== "object") return { enabled: false };
+  return {
+    enabled: source.enabled === true,
+    url: String(source.url || ""),
+    anonKey: String(source.anonKey || ""),
+    organizationId: String(source.organizationId || ""),
+    organizationSlug: String(source.organizationSlug || ""),
+    expectedPreviousRevision: Number(source.expectedPreviousRevision),
+    getAccessToken: typeof source.getAccessToken === "function" ? source.getAccessToken : null,
+    fetchImpl: typeof source.fetchImpl === "function" ? source.fetchImpl : undefined,
+    authorityContract: source.authorityContract && typeof source.authorityContract === "object"
+      ? source.authorityContract
+      : window.SupabaseAuthoritativeSync?.DEFAULT_AUTHORITY_CONTRACT,
+  };
+}
+
+function readAuthoritativeSyncActor() {
+  const accounts = readRestoreAccountsWithoutWrite();
+  return readRestoreCurrentActor(accounts);
+}
+
+const authoritativePushCoordinator = window.SupabaseAuthoritativeSync?.createAuthoritativePushCoordinator({
+  domain: window.MaterialsQuoteDomain,
+  createBundle: async () => createCurrentBackupBundle({ accounts: readRestoreAccountsWithoutWrite() }),
+  readActor: readAuthoritativeSyncActor,
+  readConfig: readAuthoritativeSyncConfiguration,
+  makeIdempotencyKey: () => window.crypto?.randomUUID?.(),
+});
+
+const AUTHORITATIVE_SYNC_STATUS_MESSAGES = Object.freeze({
+  SUPABASE_SYNC_DISABLED: "遠端同步未啟用；網站維持本機模式。",
+  SUPABASE_SYNC_LOCAL_OWNER_REQUIRED: "只有目前登入且啟用中的老闆可以推送 authoritative 資料。",
+  SUPABASE_SYNC_ACTOR_CHANGED: "同步準備期間登入身分已變更，未送出資料。",
+  SUPABASE_SYNC_BUNDLE_FAILED: "無法建立唯讀 authoritative snapshot，未送出資料。",
+  SUPABASE_SYNC_SELF_BACKUP_REQUIRED: "目前資料未通過網站自產備份驗證，未送出資料。",
+  SUPABASE_SYNC_PLAINTEXT_PASSWORD_FORBIDDEN: "帳號資料含明文 PIN，已拒絕同步。",
+  SUPABASE_SYNC_SECRET_KEY_FORBIDDEN: "authoritative payload 含禁止的秘密欄位，已拒絕同步。",
+  SUPABASE_SYNC_SOURCE_MANIFEST_KEYS_INVALID: "備份 manifest 含缺少或額外欄位，未送出資料。",
+  SUPABASE_SYNC_AUTH_TOKEN_INVALID: "需要獨立的 Supabase Auth 登入；本機 PIN 雜湊不可作為存取權杖。",
+  SUPABASE_AUTH_TOKEN_INVALID: "需要獨立的 Supabase Auth 登入；本機 PIN 雜湊不可作為存取權杖。",
+  SUPABASE_AUTH_TOKEN_UNAVAILABLE: "無法取得這次要求專用的 Supabase Auth 權杖。",
+  SUPABASE_RPC_CONFIGURATION_INVALID: "Supabase 公開設定或 Auth 邊界不完整，未送出資料。",
+  SUPABASE_RPC_NETWORK_ERROR: "無法確認遠端是否已接收；本次授權已消耗，請停止且不得重試。",
+  SUPABASE_RPC_HTTP_401: "Supabase Auth 權杖已失效；本次授權已消耗，未自動重試。",
+  SUPABASE_RPC_HTTP_403: "Supabase 拒絕目前 owner 授權；本次授權已消耗，未自動重試。",
+  SUPABASE_RPC_HTTP_409: "遠端 revision 或一次性要求衝突；本次授權已消耗，未自動重試。",
+  AUTHORITY_CONTRACT_NOT_PROVISIONED: "遠端尚未由部署 migration 登錄這個 revision 的不可變 authoritative contract，已拒絕。",
+  AUTHORITY_CONTRACT_MISMATCH: "送出內容與遠端預先登錄的 authoritative contract 不一致，已拒絕。",
+  RECORD_HASH_MANIFEST_PAYLOAD_MISMATCH: "逐筆雜湊清單與 authoritative payload 不一致，已拒絕。",
+  SOURCE_MANIFEST_KEYS_INVALID: "備份 manifest 含缺少、額外或格式不正確的欄位，已拒絕。",
+  REMOTE_NOT_EMPTY_INITIAL_PUSH_REJECTED: "遠端同步區不是空白，首次 authoritative push 已拒絕。",
+  ORGANIZATION_MISMATCH: "遠端 organization 與本機設定不一致，已拒絕。",
+  OWNER_REQUIRED: "Supabase Auth 身分不是該 organization 的 owner，已拒絕。",
+  AUTH_REQUIRED: "Supabase Auth 身分尚未建立或已停用，已拒絕。",
+  STALE_REVISION: "遠端 revision 已變更，禁止覆蓋；請由部署流程重新核對。",
+  IDEMPOTENCY_KEY_CONFLICT: "一次性同步識別碼已綁定其他要求，已拒絕。",
+  IDEMPOTENT_REPLAY_SUPERSEDED: "相同要求曾成功寫入，但遠端已有較新 revision；禁止把舊結果視為目前版本。",
+  CANONICAL_ALREADY_CURRENT_DIFFERENT_IDEMPOTENCY_KEY: "相同 authoritative 內容已是遠端目前版本，未重複寫入。",
+});
+
+function authoritativeSyncDisplayState() {
+  if (!authoritativePushCoordinator) {
+    return { mode: "local-only", enabled: false, canPush: false, phase: "error", code: "SUPABASE_SYNC_MODULE_UNAVAILABLE", revision: null, message: "同步模組未載入；網站維持本機模式。" };
+  }
+  const status = authoritativePushCoordinator.status();
+  let message = "遠端同步未啟用；網站維持本機模式。";
+  if (status.phase === "pending") message = "正在驗證並送出單向 authoritative push…";
+  else if (status.phase === "success") message = `Supabase 已確認接收 revision ${status.revision}；本機資料未被改寫。`;
+  else if (status.phase === "error") {
+    const safeCode = String(status.code || "SUPABASE_SYNC_REJECTED").replace(/[^A-Z0-9_]/g, "").slice(0, 80);
+    message = AUTHORITATIVE_SYNC_STATUS_MESSAGES[safeCode] || `同步已安全拒絕（${safeCode}）。`;
+  } else if (status.enabled && !status.canPush) message = "同步已設定，但只有目前登入且啟用中的老闆可以操作。";
+  else if (status.enabled) message = "只會由本機單向推送到 Supabase；不會下載、合併或覆蓋本機資料。";
+  return { ...status, message };
+}
+
+window.getAuthoritativeSyncDisplayState = authoritativeSyncDisplayState;
+
+const SUPABASE_RUNTIME_AUTH_STATUS_MESSAGES = Object.freeze({
+  SUPABASE_PUBLIC_CONFIG_MISSING: "Supabase 公開設定尚未提供；目前維持本機模式。",
+  SUPABASE_PUBLIC_CONFIG_REQUIRED: "Supabase 公開 project URL、publishable key 與 organization 尚待 09 注入；目前維持本機模式。",
+  SUPABASE_AUTH_SIGNED_OUT: "尚未登入 Supabase帳號；這與本機管理員／老闆 PIN 完全分離。",
+  SUPABASE_AUTH_OWNER_GATE_REQUIRED: "Supabase帳號 session 已恢復；正式流程前仍須重新驗證 organization owner。",
+  SUPABASE_AUTH_OWNER_REQUIRED: "目前 Supabase帳號不是指定 organization 的 owner，正式推送已拒絕。",
+  SUPABASE_AUTH_ORGANIZATION_MISMATCH: "Supabase Auth organization 與公開設定不一致，正式推送已拒絕。",
+  SUPABASE_AUTH_TOKEN_EXPIRED: "Supabase Auth 權杖已過期或失效，正式推送已拒絕。",
+  SUPABASE_AUTH_SESSION_EXPIRED: "Supabase Auth session 已過期且無法安全更新，請重新登入。",
+  SUPABASE_AUTH_NETWORK_ERROR: "無法完成 Supabase Auth 要求；未送出 authoritative 資料。",
+  SUPABASE_FORMAL_PUSH_CONFIRMATION_REQUIRED: "Supabase owner 已通過唯讀驗證；仍須完成 A–E 並輸入固定確認字串。",
+  SUPABASE_FORMAL_PUSH_NOT_AUTHORIZED: "尚未建立本頁一次性正式推送授權。",
+  SUPABASE_FORMAL_PUSH_IN_FLIGHT: "唯一正式推送正在進行；禁止平行要求。",
+  SUPABASE_FORMAL_PUSH_ALREADY_CONSUMED: "本頁一次性正式推送授權已消耗；不得重試。",
+});
+
+function supabaseRuntimeAuthDisplayState() {
+  const runtime = window.MaterialsQuoteSupabaseRuntime;
+  const status = typeof runtime?.status === "function"
+    ? runtime.status()
+    : { configured: false, signedIn: false, ownerVerified: false, formalAuthorized: false, phase: "idle", code: "SUPABASE_PUBLIC_CONFIG_MISSING", user: null };
+  let message = SUPABASE_RUNTIME_AUTH_STATUS_MESSAGES[status.code]
+    || "Supabase Auth 尚未完成正式推送授權；目前維持本機模式。";
+  if (status.phase === "in-flight") message = SUPABASE_RUNTIME_AUTH_STATUS_MESSAGES.SUPABASE_FORMAL_PUSH_IN_FLIGHT;
+  else if (status.phase === "consumed") message = status.lastPushOk
+    ? "唯一正式推送已完成並消耗授權；不得再次提交。"
+    : SUPABASE_RUNTIME_AUTH_STATUS_MESSAGES.SUPABASE_FORMAL_PUSH_ALREADY_CONSUMED;
+  else if (status.formalAuthorized) message = "A–E 與 Supabase owner 已確認；本頁唯一正式推送已授權，使用後立即失效。";
+  else if (status.ownerVerified) message = SUPABASE_RUNTIME_AUTH_STATUS_MESSAGES.SUPABASE_FORMAL_PUSH_CONFIRMATION_REQUIRED;
+  return { ...status, message };
+}
+
+window.getSupabaseRuntimeAuthDisplayState = supabaseRuntimeAuthDisplayState;
+
+function updateAuthoritativeSyncStatusUi() {
+  const status = authoritativeSyncDisplayState();
+  const statusElement = document.querySelector("[data-authoritative-sync-status]");
+  const button = document.querySelector("[data-authoritative-sync-push]");
+  if (statusElement) {
+    statusElement.textContent = status.message;
+    statusElement.className = `hint ${status.phase === "success" ? "green" : "amber"}`;
+  }
+  if (button) {
+    button.disabled = !status.canPush;
+    button.textContent = status.phase === "pending" ? "正在送出…" : "推送已驗證本機資料";
+  }
+  return status;
+}
+
+function refreshSupabaseRuntimeStatusUi() {
+  if (typeof window.refreshSupabaseRuntimePanel === "function" && window.refreshSupabaseRuntimePanel()) {
+    return supabaseRuntimeAuthDisplayState();
+  }
+  updateAuthoritativeSyncStatusUi();
+  return supabaseRuntimeAuthDisplayState();
+}
+
+window.signInSupabaseAccount = async function () {
+  const runtime = window.MaterialsQuoteSupabaseRuntime;
+  const emailInput = document.querySelector("[data-supabase-auth-email]");
+  const passwordInput = document.querySelector("[data-supabase-auth-password]");
+  if (!runtime || typeof runtime.signInWithPassword !== "function" || !emailInput || !passwordInput) {
+    const result = { ok: false, code: "SUPABASE_AUTH_RUNTIME_UNAVAILABLE" };
+    showBackupDownloadToastWithoutRender("Supabase Auth 模組或公開設定尚未就緒；未送出資料。");
+    return result;
+  }
+  const result = await runtime.signInWithPassword(emailInput.value, passwordInput.value);
+  passwordInput.value = "";
+  const finalStatus = refreshSupabaseRuntimeStatusUi();
+  showBackupDownloadToastWithoutRender(finalStatus.message);
+  return result;
+};
+
+window.signOutSupabaseAccount = async function () {
+  const runtime = window.MaterialsQuoteSupabaseRuntime;
+  if (!runtime || typeof runtime.signOut !== "function") return { ok: false, code: "SUPABASE_AUTH_RUNTIME_UNAVAILABLE" };
+  const result = await runtime.signOut();
+  const finalStatus = refreshSupabaseRuntimeStatusUi();
+  showBackupDownloadToastWithoutRender(finalStatus.message);
+  return result;
+};
+
+window.verifySupabaseOwnerMembership = async function () {
+  const runtime = window.MaterialsQuoteSupabaseRuntime;
+  if (!runtime || typeof runtime.verifyOwnerMembership !== "function") return { ok: false, code: "SUPABASE_AUTH_RUNTIME_UNAVAILABLE" };
+  const result = await runtime.verifyOwnerMembership();
+  const finalStatus = refreshSupabaseRuntimeStatusUi();
+  showBackupDownloadToastWithoutRender(finalStatus.message);
+  return result;
+};
+
+window.authorizeSupabaseFormalPush = async function () {
+  const runtime = window.MaterialsQuoteSupabaseRuntime;
+  const confirmationInput = document.querySelector("[data-supabase-formal-confirmation]");
+  const artifactGateInput = document.querySelector("[data-supabase-artifact-gates]");
+  if (!runtime || typeof runtime.authorizeFormalPushOnce !== "function" || !confirmationInput || !artifactGateInput) {
+    return { ok: false, code: "SUPABASE_FORMAL_PUSH_RUNTIME_UNAVAILABLE" };
+  }
+  const result = await runtime.authorizeFormalPushOnce({
+    confirmation: confirmationInput.value,
+    artifactGatesAccepted: artifactGateInput.checked === true,
+  });
+  confirmationInput.value = "";
+  artifactGateInput.checked = false;
+  const finalStatus = refreshSupabaseRuntimeStatusUi();
+  showBackupDownloadToastWithoutRender(finalStatus.message);
+  return result;
+};
+
+window.addEventListener("materials-quote-supabase-auth-change", () => {
+  if (document.querySelector("[data-authoritative-sync-panel]")) refreshSupabaseRuntimeStatusUi();
+});
+
+window.pushAuthoritativeSnapshotToSupabase = async function () {
+  const initial = authoritativeSyncDisplayState();
+  if (!initial.enabled || !initial.canPush) {
+    showBackupDownloadToastWithoutRender(initial.message);
+    return { ok: false, code: initial.code || "SUPABASE_SYNC_NOT_AVAILABLE" };
+  }
+  const confirmed = window.confirm("這是單向 push：不會從 Supabase 下載或合併資料。首次 push 只允許遠端同步區為空，任何不一致都會整筆拒絕。確定送出已驗證的本機 authoritative 資料？");
+  if (!confirmed) return { ok: false, code: "SUPABASE_SYNC_CANCELLED" };
+
+  const runtime = window.MaterialsQuoteSupabaseRuntime;
+  if (!runtime || typeof runtime.executeFormalPush !== "function") {
+    return { ok: false, code: "SUPABASE_FORMAL_PUSH_RUNTIME_UNAVAILABLE" };
+  }
+  const resultPromise = runtime.executeFormalPush(() => authoritativePushCoordinator.push());
+  updateAuthoritativeSyncStatusUi();
+  const result = await resultPromise;
+  const finalStatus = updateAuthoritativeSyncStatusUi();
+  showBackupDownloadToastWithoutRender(finalStatus.message);
+  return result;
+};
+
 function restoreFileIdentity(file) {
   return {
     name: String(file?.name || ""),

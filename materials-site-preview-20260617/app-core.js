@@ -352,7 +352,7 @@ function hasAccountPermission(account, key) {
 }
 
 function currentAccountCan(key) {
-  return hasAccountPermission(currentUser(), key);
+  return hasAccountPermission(currentUser({ readOnly: true }), key);
 }
 
 function canManageAccounts() {

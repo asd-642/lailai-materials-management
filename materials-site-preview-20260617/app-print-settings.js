@@ -274,6 +274,77 @@ function renderPrintDetail(liveQuote) {
   </main>`;
 }
 
+function renderAuthoritativeSyncPanel() {
+  const status = typeof window.getAuthoritativeSyncDisplayState === "function"
+    ? window.getAuthoritativeSyncDisplayState()
+    : { enabled: false, canPush: false, phase: "idle", message: "遠端同步未啟用；網站維持本機模式。" };
+  const auth = typeof window.getSupabaseRuntimeAuthDisplayState === "function"
+    ? window.getSupabaseRuntimeAuthDisplayState()
+    : {
+        configured: false,
+        signedIn: false,
+        ownerVerified: false,
+        formalAuthorized: false,
+        phase: "idle",
+        message: "Supabase 公開設定尚未完成；目前維持本機模式。",
+      };
+  const artifactContract = window.MaterialsQuoteSupabaseRuntimeConfig?.APPROVED_ARTIFACTS || {};
+  const signedInControls = auth.signedIn
+    ? `<div class="form-grid" data-supabase-auth-signed-in>
+        <div class="hint green">Supabase帳號已登入：${h(auth.user?.email || "已驗證使用者")}</div>
+        <div class="backup-actions">
+          <button class="btn outline" type="button" onclick="verifySupabaseOwnerMembership()">重新驗證 Supabase owner</button>
+          <button class="btn outline" type="button" onclick="signOutSupabaseAccount()">登出 Supabase帳號</button>
+        </div>
+      </div>`
+    : `<div class="form-grid" data-supabase-auth-signed-out>
+        <label>Supabase帳號 Email
+          <input type="email" autocomplete="username" inputmode="email" data-supabase-auth-email placeholder="owner@example.com" />
+        </label>
+        <label>Supabase 密碼（不是管理員／老闆 PIN）
+          <input type="password" autocomplete="current-password" data-supabase-auth-password />
+        </label>
+        <div class="backup-actions">
+          <button class="btn" type="button" onclick="signInSupabaseAccount()">登入 Supabase帳號並驗證 owner</button>
+        </div>
+      </div>`;
+  const formalControls = auth.signedIn && auth.ownerVerified
+    ? `<div class="form-grid" data-supabase-formal-gate>
+        <div class="hint amber">只有 09 已完成 A–E（pre-push gate、Auth owner gate、post-push artifact 已鎖定）後，才可在本頁建立一次性授權。授權只存在記憶體，任何結果皆不可重試。</div>
+        <label class="check-row"><input type="checkbox" data-supabase-artifact-gates />我已逐項確認本次 A–E artifact gates 全部 PASS</label>
+        <label>固定確認字串「啟用唯一正式推送」
+          <input type="text" autocomplete="off" data-supabase-formal-confirmation placeholder="啟用唯一正式推送" />
+        </label>
+        <p class="sub">pre-push SHA ${h(artifactContract.prePushGateSha256 || "未載入")}<br>post-push SHA ${h(artifactContract.postPushGateSha256 || "未載入")}</p>
+        <div class="backup-actions">
+          <button class="btn outline" type="button" onclick="authorizeSupabaseFormalPush()" ${auth.formalAuthorized ? "disabled" : ""}>${auth.formalAuthorized ? "本次正式推送已授權" : "建立本頁一次性正式推送授權"}</button>
+        </div>
+      </div>`
+    : "";
+  return `
+    <section class="card" data-authoritative-sync-panel>
+      <div class="card-header"><h2>Supabase authoritative 同步</h2></div>
+      <div class="card-body">
+        <div class="hint ${auth.ownerVerified ? "green" : "amber"}" data-supabase-auth-status role="status" aria-live="polite">${h(auth.message)}</div>
+        ${auth.configured ? signedInControls : `<p class="sub">公開 project URL、publishable key、project ref 與 organization 尚未由 09 注入並驗證；所有遠端要求均維持 0。</p>`}
+        ${formalControls}
+        <div class="hint ${status.phase === "success" ? "green" : "amber"}" data-authoritative-sync-status role="status" aria-live="polite">${h(status.message)}</div>
+        <p class="sub">此階段只提供「本機 → Supabase」單向 push，不提供 pull 或 merge。遠端空白、organization、revision、hash、counts、idempotency 或 owner 授權任一不符時，整筆拒絕且不會部分寫入。</p>
+        <div class="backup-actions">
+          <button class="btn" type="button" data-authoritative-sync-push onclick="pushAuthoritativeSnapshotToSupabase()" ${status.canPush ? "" : "disabled"}>推送已驗證本機資料</button>
+        </div>
+        <p class="sub">遠端設定預設關閉，且必須由獨立的 Supabase Auth owner session 提供短期 access token；本機 PIN 或 PIN 雜湊不會被當作 Supabase 憑證。</p>
+      </div>
+    </section>`;
+}
+
+window.refreshSupabaseRuntimePanel = function () {
+  const panel = document.querySelector("[data-authoritative-sync-panel]");
+  if (!panel) return false;
+  panel.outerHTML = renderAuthoritativeSyncPanel();
+  return true;
+};
+
 function renderSettings() {
   if (!canEditCompanySettings()) return renderAccessDenied();
   const c = state.company;
@@ -311,6 +382,7 @@ function renderSettings() {
         </div>
         <p class="sub">備份包含客戶、名片、材料、公式版本、報價、帳號雜湊、公司設定與工作日誌，不包含登入中的瀏覽器狀態。</p>
       </div></section>
+      ${renderAuthoritativeSyncPanel()}
     </form>
   `;
 }
