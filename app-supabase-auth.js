@@ -7,7 +7,7 @@
   "use strict";
 
   const FORMAL_PUSH_CONFIRMATION = "啟用唯一正式推送";
-  const AUTH_RUNTIME_VERSION = "20260812-auth-runtime-syntax-001";
+  const AUTH_RUNTIME_VERSION = "20260813-auth-login-diagnostic-001";
   const SESSION_REFRESH_MARGIN_SECONDS = 60;
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const MAGIC_LINK_CALLBACK_ROOT_URL = "https://asd-642.github.io/lailai-materials-management/";
@@ -635,7 +635,9 @@
       if (!signedInSession) {
         clearStoredSession();
         emit("SIGNED_OUT");
-        return errorResult(response.code || `SUPABASE_AUTH_HTTP_${response.status || 0}`);
+        return errorResult(response.ok
+          ? "SUPABASE_AUTH_LOGIN_RESPONSE_INVALID"
+          : (response.code || `SUPABASE_AUTH_HTTP_${response.status || 0}`));
       }
       if (!writeStoredSession(signedInSession)) {
         clearStoredSession();
@@ -768,6 +770,7 @@
     let authorizationPhase = "idle";
     let ownerBootstrapPhase = "idle";
     let lastCode = publicConfig ? "SUPABASE_AUTH_SIGNED_OUT" : "SUPABASE_PUBLIC_CONFIG_REQUIRED";
+    let loginStage = "idle";
     let callbackStage = "";
     let lastPushResult = null;
 
@@ -811,6 +814,7 @@
         canBootstrapFirstOwner,
         ownerBootstrapPhase,
         code: String(lastCode || ""),
+        loginStage,
         callbackStage,
         lastPushOk: lastPushResult?.ok === true,
       });
@@ -865,19 +869,29 @@
       ownerVerified = false;
       if (ownerBootstrapPhase !== "consumed") ownerBootstrapPhase = "idle";
       lastPushResult = null;
+      loginStage = "request-pending";
+      publish();
       const signedIn = await provider.signInWithPassword(email, password);
       if (!signedIn.ok) {
         lastCode = signedIn.code;
+        loginStage = signedIn.code === "SUPABASE_AUTH_LOGIN_RESPONSE_INVALID"
+          ? "response-invalid"
+          : (signedIn.code === "SUPABASE_AUTH_SESSION_STORAGE_FAILED" ? "storage-rejected" : "request-rejected");
         publish();
         return signedIn;
       }
+      loginStage = "session-established";
+      publish();
       const gate = await verifyOwnerMembership();
+      loginStage = "owner-gate-complete";
+      publish();
       return gate.ok ? signedIn : gate;
     }
 
     async function signOut() {
       callbackDiagnostics.clear();
       callbackStage = "";
+      loginStage = "idle";
       lastCode = "SUPABASE_AUTH_SIGNED_OUT";
       authorizationPhase = "idle";
       ownerVerified = false;

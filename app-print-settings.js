@@ -330,7 +330,7 @@ function renderAuthoritativeSyncPanel() {
       </div>`
     : "";
   return `
-    <section class="card" data-authoritative-sync-panel>
+    <section class="card" data-authoritative-sync-panel data-supabase-auth-runtime-state="${auth.signedIn ? "signed-in" : "signed-out"}" data-supabase-auth-code="${h(auth.code || "")}" data-supabase-auth-login-stage="${h(auth.loginStage || "idle")}">
       <div class="card-header"><h2>Supabase authoritative 同步</h2></div>
       <div class="card-body">
         <div class="hint ${auth.ownerVerified ? "green" : "amber"}" data-supabase-auth-status role="status" aria-live="polite">${h(auth.message)}</div>

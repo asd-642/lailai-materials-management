@@ -2476,6 +2476,8 @@ const SUPABASE_RUNTIME_AUTH_STATUS_MESSAGES = Object.freeze({
   SUPABASE_PUBLIC_CONFIG_MISSING: "Supabase 公開設定尚未提供；目前維持本機模式。",
   SUPABASE_PUBLIC_CONFIG_REQUIRED: "Supabase 公開 project URL、publishable key 與 organization 尚待 09 注入；目前維持本機模式。",
   SUPABASE_AUTH_SIGNED_OUT: "尚未登入 Supabase帳號；這與本機管理員／老闆 PIN 完全分離。",
+  SUPABASE_AUTH_LOGIN_RESPONSE_INVALID: "Supabase 已接受登入要求，但 session 回覆格式無法安全驗證；未保存任何登入狀態。",
+  SUPABASE_AUTH_SESSION_STORAGE_FAILED: "Supabase session 無法寫入或讀回瀏覽器安全儲存；登入狀態未建立。",
   SUPABASE_AUTH_OWNER_GATE_REQUIRED: "Supabase帳號 session 已恢復；正式流程前仍須重新驗證 organization owner。",
   SUPABASE_AUTH_OWNER_REQUIRED: "目前 Supabase帳號不是指定 organization 的 owner，正式推送已拒絕。",
   SUPABASE_AUTH_MEMBERSHIP_INVALID: "目前 Supabase帳號尚無 organization membership；只有遠端完全未初始化時才可建立首位 owner。",
