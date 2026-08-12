@@ -7,10 +7,18 @@
   "use strict";
 
   const FORMAL_PUSH_CONFIRMATION = "啟用唯一正式推送";
-  const AUTH_RUNTIME_VERSION = "20260812-magic-link-session-001";
+  const AUTH_RUNTIME_VERSION = "20260812-magic-link-root-equivalence-002";
   const SESSION_REFRESH_MARGIN_SECONDS = 60;
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  const MAGIC_LINK_CALLBACK_URL = "https://asd-642.github.io/my-scuba-site/materials-site-preview-20260617/index.html";
+  const MAGIC_LINK_CALLBACK_ROOT_URL = "https://asd-642.github.io/my-scuba-site/materials-site-preview-20260617/";
+  const MAGIC_LINK_CALLBACK_INDEX_URL = `${MAGIC_LINK_CALLBACK_ROOT_URL}index.html`;
+  const MAGIC_LINK_CALLBACK_URL = MAGIC_LINK_CALLBACK_INDEX_URL;
+  const MAGIC_LINK_CALLBACK_URLS = Object.freeze([MAGIC_LINK_CALLBACK_ROOT_URL, MAGIC_LINK_CALLBACK_INDEX_URL]);
+  const MAGIC_LINK_CALLBACK_ORIGIN = "https://asd-642.github.io";
+  const MAGIC_LINK_CALLBACK_PATHS = Object.freeze(new Set([
+    "/my-scuba-site/materials-site-preview-20260617/",
+    "/my-scuba-site/materials-site-preview-20260617/index.html",
+  ]));
   const CALLBACK_MAX_LENGTH = 16384;
   const TOKEN_MAX_LENGTH = 8192;
   const PROJECT_REF_PATTERN = /^[a-z0-9]{20}$/;
@@ -93,26 +101,14 @@
     return Object.freeze({ ok: true, values: Object.freeze(values), count });
   }
 
-  function exactMagicLinkPageIdentity(callbackSource, expectedCallbackUrl = MAGIC_LINK_CALLBACK_URL) {
+  function exactMagicLinkPageIdentity(callbackSource) {
     if (!callbackSource || callbackSource.scrubbed !== true || callbackSource.oversized === true) return false;
-    try {
-      const expected = new URL(String(expectedCallbackUrl || ""));
-      return expected.href === MAGIC_LINK_CALLBACK_URL
-        && expected.protocol === "https:"
-        && !expected.username
-        && !expected.password
-        && !expected.port
-        && !expected.search
-        && !expected.hash
-        && String(callbackSource.origin || "") === expected.origin
-        && String(callbackSource.pathname || "") === expected.pathname;
-    } catch (error) {
-      return false;
-    }
+    return String(callbackSource.origin || "") === MAGIC_LINK_CALLBACK_ORIGIN
+      && MAGIC_LINK_CALLBACK_PATHS.has(String(callbackSource.pathname || ""));
   }
 
-  function parseMagicLinkCallback(callbackSource, expectedCallbackUrl = MAGIC_LINK_CALLBACK_URL) {
-    if (!exactMagicLinkPageIdentity(callbackSource, expectedCallbackUrl)) {
+  function parseMagicLinkCallback(callbackSource) {
+    if (!exactMagicLinkPageIdentity(callbackSource)) {
       return errorResult("SUPABASE_AUTH_CALLBACK_PAGE_IDENTITY_INVALID");
     }
     const query = parseCallbackParameters(callbackSource.search, "?", CALLBACK_QUERY_FIELDS);
@@ -454,7 +450,7 @@
     async function establishMagicLinkSession(callbackSource) {
       if (callbackConsumed) return errorResult("SUPABASE_AUTH_CALLBACK_ALREADY_CONSUMED");
       callbackConsumed = true;
-      const parsed = parseMagicLinkCallback(callbackSource, MAGIC_LINK_CALLBACK_URL);
+      const parsed = parseMagicLinkCallback(callbackSource);
       if (!parsed.ok) return parsed;
       const result = parsed.mode === "implicit"
         ? await setSession({ access_token: parsed.accessToken, refresh_token: parsed.refreshToken })
@@ -849,6 +845,7 @@
     FORMAL_PUSH_CONFIRMATION,
     AUTH_RUNTIME_VERSION,
     MAGIC_LINK_CALLBACK_URL,
+    MAGIC_LINK_CALLBACK_URLS,
     parseMagicLinkCallback,
     validateMagicLinkAccessToken,
     createSupabaseAuthProvider,
