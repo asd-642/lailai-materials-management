@@ -5,8 +5,10 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function (root) {
   "use strict";
 
-  const RUNTIME_CONFIG_VERSION = "20260811-authority-rebase-004";
-  const PUBLIC_CONFIG_SCHEMA = "materials-quote-supabase-runtime-public-config/v1";
+  const RUNTIME_CONFIG_VERSION = "20260811-password-recovery-005";
+  const PUBLIC_CONFIG_SCHEMA = "materials-quote-supabase-runtime-public-config/v2";
+  const FORMAL_SITE_BASE_URL = "https://asd-642.github.io/my-scuba-site/materials-site-preview-20260617/";
+  const PASSWORD_RECOVERY_REDIRECT_URL = `${FORMAL_SITE_BASE_URL}supabase-password-recovery.html`;
   const EXPECTED_ORGANIZATION_SLUG = "lai-lai-materials";
   const EXPECTED_PREVIOUS_REVISION = 0;
   const PROJECT_REF_PATTERN = /^[a-z0-9]{20}$/;
@@ -20,6 +22,7 @@
     "expectedProjectRef",
     "organizationId",
     "organizationSlug",
+    "passwordRecoveryRedirectUrl",
     "projectUrl",
     "publishableKey",
     "schema",
@@ -179,6 +182,21 @@
     if (url.hostname.toLowerCase() !== `${expectedProjectRef}.supabase.co`) {
       return resultError("SUPABASE_PROJECT_MISMATCH");
     }
+    let passwordRecoveryRedirect;
+    try {
+      passwordRecoveryRedirect = new URL(String(source.passwordRecoveryRedirectUrl || ""));
+    } catch (error) {
+      return resultError("SUPABASE_PASSWORD_RECOVERY_REDIRECT_INVALID");
+    }
+    if (passwordRecoveryRedirect.href !== PASSWORD_RECOVERY_REDIRECT_URL
+      || passwordRecoveryRedirect.protocol !== "https:"
+      || passwordRecoveryRedirect.username
+      || passwordRecoveryRedirect.password
+      || passwordRecoveryRedirect.port
+      || passwordRecoveryRedirect.search
+      || passwordRecoveryRedirect.hash) {
+      return resultError("SUPABASE_PASSWORD_RECOVERY_REDIRECT_INVALID");
+    }
     const keyValidation = validatePublishableKey(source.publishableKey, expectedProjectRef);
     if (!keyValidation.ok) {
       return resultError("SUPABASE_PUBLIC_KEY_INVALID");
@@ -208,6 +226,7 @@
       expectedProjectRef,
       organizationId,
       organizationSlug: EXPECTED_ORGANIZATION_SLUG,
+      passwordRecoveryRedirectUrl: PASSWORD_RECOVERY_REDIRECT_URL,
       expectedPreviousRevision: EXPECTED_PREVIOUS_REVISION,
       approvedArtifacts: APPROVED_ARTIFACTS,
       keyKind: keyValidation.keyKind,
@@ -284,6 +303,8 @@
   return Object.freeze({
     RUNTIME_CONFIG_VERSION,
     PUBLIC_CONFIG_SCHEMA,
+    FORMAL_SITE_BASE_URL,
+    PASSWORD_RECOVERY_REDIRECT_URL,
     EXPECTED_ORGANIZATION_SLUG,
     EXPECTED_PREVIOUS_REVISION,
     APPROVED_ARTIFACTS,

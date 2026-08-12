@@ -6,13 +6,14 @@
 
   initializer.initialize(
   {
-    "schema": "materials-quote-supabase-runtime-public-config/v1",
+    "schema": "materials-quote-supabase-runtime-public-config/v2",
     "enabled": true,
     "projectUrl": "https://augtokdenohtzjkrgdek.supabase.co",
     "publishableKey": "sb_publishable_9hNIesnb8gM0P_-z0U1WbQ_8EgCMn6d",
     "expectedProjectRef": "augtokdenohtzjkrgdek",
     "organizationId": "24be5d69-fed7-4677-9696-063353069b97",
     "organizationSlug": "lai-lai-materials",
+    "passwordRecoveryRedirectUrl": "https://asd-642.github.io/my-scuba-site/materials-site-preview-20260617/supabase-password-recovery.html",
     "expectedPreviousRevision": 0,
     "approvedArtifacts": {
       "prePushGateSha256": "9AA7F703C3282441AC6892AB9AFD20BADA0E5713958FAB175C1CF5D3BAD721AF",
