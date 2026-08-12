@@ -7,11 +7,192 @@
   "use strict";
 
   const FORMAL_PUSH_CONFIRMATION = "啟用唯一正式推送";
+  const AUTH_RUNTIME_VERSION = "20260812-magic-link-session-001";
   const SESSION_REFRESH_MARGIN_SECONDS = 60;
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const MAGIC_LINK_CALLBACK_URL = "https://asd-642.github.io/my-scuba-site/materials-site-preview-20260617/index.html";
+  const CALLBACK_MAX_LENGTH = 16384;
+  const TOKEN_MAX_LENGTH = 8192;
+  const PROJECT_REF_PATTERN = /^[a-z0-9]{20}$/;
+  const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const AUTH_CODE_PATTERN = /^[A-Za-z0-9._~-]{20,2048}$/;
+  const PKCE_VERIFIER_PATTERN = /^[A-Za-z0-9._~-]{43,128}$/;
+  const CALLBACK_QUERY_FIELDS = Object.freeze(new Set(["code", "type"]));
+  const CALLBACK_FRAGMENT_FIELDS = Object.freeze(new Set([
+    "access_token",
+    "expires_at",
+    "expires_in",
+    "refresh_token",
+    "token_type",
+    "type",
+  ]));
 
   function errorResult(code) {
     return Object.freeze({ ok: false, code: String(code || "SUPABASE_AUTH_REJECTED") });
+  }
+
+  function isRecord(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function hasOwn(value, key) {
+    return Object.prototype.hasOwnProperty.call(value, key);
+  }
+
+  function decodeBase64UrlJson(segment) {
+    const source = String(segment || "");
+    if (!source || source.length > TOKEN_MAX_LENGTH || !/^[A-Za-z0-9_-]+$/.test(source) || source.length % 4 === 1) return null;
+    try {
+      const base64 = source.replace(/-/g, "+").replace(/_/g, "/");
+      const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+      let json;
+      let canonical;
+      if (typeof Buffer !== "undefined") {
+        const bytes = Buffer.from(padded, "base64");
+        canonical = bytes.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+        json = bytes.toString("utf8");
+        if (!Buffer.from(json, "utf8").equals(bytes)) return null;
+      } else {
+        const binary = root.atob(padded);
+        canonical = root.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+        json = decodeURIComponent(Array.from(binary, (character) => `%${character.charCodeAt(0).toString(16).padStart(2, "0")}`).join(""));
+      }
+      if (canonical !== source) return null;
+      const value = JSON.parse(json);
+      return isRecord(value) ? value : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function parseCallbackParameters(rawValue, prefix, allowedFields) {
+    const raw = String(rawValue || "");
+    if (!raw) return Object.freeze({ ok: true, values: Object.freeze({}), count: 0 });
+    if (raw.length > CALLBACK_MAX_LENGTH || raw[0] !== prefix || raw === prefix || /%(?![0-9A-Fa-f]{2})/.test(raw)) {
+      return errorResult("SUPABASE_AUTH_CALLBACK_ENCODING_INVALID");
+    }
+    const values = {};
+    let count = 0;
+    try {
+      const params = new URLSearchParams(raw.slice(1));
+      for (const [key, value] of params.entries()) {
+        count += 1;
+        if (!allowedFields.has(key)
+          || hasOwn(values, key)
+          || value === ""
+          || value.length > TOKEN_MAX_LENGTH
+          || /[\u0000-\u001F\u007F]/.test(value)) {
+          return errorResult("SUPABASE_AUTH_CALLBACK_FIELDS_INVALID");
+        }
+        values[key] = value;
+      }
+    } catch (error) {
+      return errorResult("SUPABASE_AUTH_CALLBACK_ENCODING_INVALID");
+    }
+    if (count === 0) return errorResult("SUPABASE_AUTH_CALLBACK_FIELDS_INVALID");
+    return Object.freeze({ ok: true, values: Object.freeze(values), count });
+  }
+
+  function exactMagicLinkPageIdentity(callbackSource, expectedCallbackUrl = MAGIC_LINK_CALLBACK_URL) {
+    if (!callbackSource || callbackSource.scrubbed !== true || callbackSource.oversized === true) return false;
+    try {
+      const expected = new URL(String(expectedCallbackUrl || ""));
+      return expected.href === MAGIC_LINK_CALLBACK_URL
+        && expected.protocol === "https:"
+        && !expected.username
+        && !expected.password
+        && !expected.port
+        && !expected.search
+        && !expected.hash
+        && String(callbackSource.origin || "") === expected.origin
+        && String(callbackSource.pathname || "") === expected.pathname;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function parseMagicLinkCallback(callbackSource, expectedCallbackUrl = MAGIC_LINK_CALLBACK_URL) {
+    if (!exactMagicLinkPageIdentity(callbackSource, expectedCallbackUrl)) {
+      return errorResult("SUPABASE_AUTH_CALLBACK_PAGE_IDENTITY_INVALID");
+    }
+    const query = parseCallbackParameters(callbackSource.search, "?", CALLBACK_QUERY_FIELDS);
+    const fragment = parseCallbackParameters(callbackSource.hash, "#", CALLBACK_FRAGMENT_FIELDS);
+    if (!query.ok) return query;
+    if (!fragment.ok) return fragment;
+    if (query.count > 0 && fragment.count > 0) return errorResult("SUPABASE_AUTH_CALLBACK_CONFLICT");
+    if (query.count === 0 && fragment.count === 0) return errorResult("SUPABASE_AUTH_CALLBACK_MISSING");
+
+    if (query.count > 0) {
+      const values = query.values;
+      const keys = Object.keys(values).sort();
+      if (!keys.every((key) => ["code", "type"].includes(key))
+        || !hasOwn(values, "code")
+        || !AUTH_CODE_PATTERN.test(values.code)
+        || (hasOwn(values, "type") && values.type !== "magiclink")) {
+        return errorResult("SUPABASE_AUTH_CALLBACK_FIELDS_INVALID");
+      }
+      return Object.freeze({ ok: true, code: "", mode: "pkce", authCode: values.code });
+    }
+
+    const values = fragment.values;
+    const required = ["access_token", "expires_in", "refresh_token", "token_type", "type"];
+    if (!required.every((key) => hasOwn(values, key))
+      || !Object.keys(values).every((key) => required.includes(key) || key === "expires_at")
+      || values.type !== "magiclink"
+      || String(values.token_type).toLowerCase() !== "bearer") {
+      return errorResult("SUPABASE_AUTH_CALLBACK_FIELDS_INVALID");
+    }
+    const expiresIn = Number(values.expires_in);
+    const expiresAt = hasOwn(values, "expires_at") ? Number(values.expires_at) : null;
+    if (!Number.isSafeInteger(expiresIn)
+      || expiresIn < 1
+      || expiresIn > 86400
+      || (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt < 1))
+      || String(values.access_token).length > TOKEN_MAX_LENGTH
+      || String(values.refresh_token).length < 20
+      || String(values.refresh_token).length > TOKEN_MAX_LENGTH) {
+      return errorResult("SUPABASE_AUTH_CALLBACK_SESSION_INVALID");
+    }
+    return Object.freeze({
+      ok: true,
+      code: "",
+      mode: "implicit",
+      accessToken: values.access_token,
+      refreshToken: values.refresh_token,
+      expiresAt,
+    });
+  }
+
+  function validateMagicLinkAccessToken(accessToken, config, nowSeconds) {
+    const token = String(accessToken || "");
+    const projectRef = String(config?.expectedProjectRef || "");
+    const projectUrl = normalizeUrl(config?.projectUrl);
+    if (!PROJECT_REF_PATTERN.test(projectRef)
+      || projectUrl !== `https://${projectRef}.supabase.co`
+      || token.length > TOKEN_MAX_LENGTH) {
+      return null;
+    }
+    const parts = token.split(".");
+    if (parts.length !== 3 || !parts[2] || !/^[A-Za-z0-9_-]+$/.test(parts[2])) return null;
+    const header = decodeBase64UrlJson(parts[0]);
+    const payload = decodeBase64UrlJson(parts[1]);
+    if (!header
+      || !payload
+      || !["HS256", "RS256", "ES256"].includes(header.alg)
+      || (hasOwn(header, "typ") && header.typ !== "JWT")
+      || payload.iss !== `${projectUrl}/auth/v1`
+      || payload.role !== "authenticated"
+      || !UUID_PATTERN.test(String(payload.sub || ""))
+      || (hasOwn(payload, "ref") && payload.ref !== projectRef)) {
+      return null;
+    }
+    const audience = payload.aud;
+    if (audience !== "authenticated"
+      && !(Array.isArray(audience) && audience.length > 0 && audience.every((entry) => entry === "authenticated"))) {
+      return null;
+    }
+    const expiresAt = Number(payload.exp);
+    return Number.isSafeInteger(expiresAt) && expiresAt > nowSeconds ? payload : null;
   }
 
   function normalizeUrl(value) {
@@ -74,9 +255,11 @@
     const sessionStorage = storage !== undefined ? storage : (root?.localStorage || null);
     const nowMs = typeof now === "function" ? now : () => Date.now();
     const sessionKey = projectRef ? `sb-${projectRef}-auth-token` : "";
+    const pkceVerifierKey = sessionKey ? `${sessionKey}-code-verifier` : "";
     const listeners = new Set();
     let currentSession = null;
     let refreshing = null;
+    let callbackConsumed = false;
 
     function emit(event) {
       const snapshot = safeSession(currentSession);
@@ -156,6 +339,128 @@
       } catch (error) {
         return errorResult("SUPABASE_AUTH_NETWORK_ERROR");
       }
+    }
+
+    async function exactAuthRequest(path, { method, body, accessToken } = {}) {
+      if (!request || !projectUrl || !publishableKey) return errorResult("SUPABASE_AUTH_CONFIGURATION_INVALID");
+      const url = `${projectUrl}${path}`;
+      const headers = { apikey: publishableKey };
+      if (body !== undefined) headers["Content-Type"] = "application/json";
+      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+      let response;
+      try {
+        response = await request(url, {
+          method: String(method || "GET"),
+          headers,
+          body: body === undefined ? undefined : JSON.stringify(body),
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
+          referrerPolicy: "no-referrer",
+        });
+      } catch (error) {
+        return errorResult("SUPABASE_AUTH_NETWORK_ERROR");
+      }
+      if (!response || response.redirected !== false || response.url !== url) {
+        return errorResult("SUPABASE_AUTH_RESPONSE_IDENTITY_INVALID");
+      }
+      const value = await responseJson(response);
+      return Object.freeze({ ok: response.ok === true, status: Number(response.status), value });
+    }
+
+    async function setSession(source) {
+      if (!isRecord(source)) return errorResult("SUPABASE_AUTH_CALLBACK_SESSION_INVALID");
+      const accessToken = String(source.access_token || "");
+      const refreshToken = String(source.refresh_token || "");
+      const nowSeconds = Math.floor(Number(nowMs()) / 1000);
+      const claims = validateMagicLinkAccessToken(accessToken, config, nowSeconds);
+      if (!claims
+        || refreshToken.length < 20
+        || refreshToken.length > TOKEN_MAX_LENGTH) {
+        return errorResult("SUPABASE_AUTH_CALLBACK_PROJECT_IDENTITY_INVALID");
+      }
+
+      const verified = await exactAuthRequest("/auth/v1/user", { method: "GET", accessToken });
+      const user = verified.ok && isRecord(verified.value) ? verified.value : null;
+      if (!user || String(user.id || "") !== String(claims.sub)) {
+        return errorResult(verified.code || "SUPABASE_AUTH_CALLBACK_USER_INVALID");
+      }
+      const sessionValue = normalizeSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        expires_at: Number(claims.exp),
+        expires_in: Math.max(0, Number(claims.exp) - nowSeconds),
+        token_type: "bearer",
+        user: {
+          id: String(user.id),
+          email: String(user.email || ""),
+        },
+      });
+      if (!sessionValue || !writeStoredSession(sessionValue)) {
+        return errorResult("SUPABASE_AUTH_SESSION_STORAGE_FAILED");
+      }
+      currentSession = sessionValue;
+      emit("SIGNED_IN");
+      return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
+    }
+
+    function consumePkceVerifier() {
+      if (!sessionStorage || !pkceVerifierKey) return null;
+      let stored = "";
+      try {
+        stored = String(sessionStorage.getItem(pkceVerifierKey) || "");
+        sessionStorage.removeItem(pkceVerifierKey);
+      } catch (error) {
+        return null;
+      }
+      const parts = stored.split("/");
+      if (parts.length > 2
+        || !PKCE_VERIFIER_PATTERN.test(parts[0] || "")
+        || (parts.length === 2 && parts[1] !== "MAGIC_LINK")) {
+        return null;
+      }
+      return parts[0];
+    }
+
+    async function exchangeCodeForSession(authCode) {
+      const code = String(authCode || "");
+      if (!AUTH_CODE_PATTERN.test(code)) return errorResult("SUPABASE_AUTH_CALLBACK_FIELDS_INVALID");
+      const codeVerifier = consumePkceVerifier();
+      if (!codeVerifier) return errorResult("SUPABASE_AUTH_PKCE_CONTEXT_UNAVAILABLE");
+      const exchanged = await exactAuthRequest("/auth/v1/token?grant_type=pkce", {
+        method: "POST",
+        body: { auth_code: code, code_verifier: codeVerifier },
+      });
+      if (!exchanged.ok || !isRecord(exchanged.value)) {
+        return errorResult(exchanged.code || `SUPABASE_AUTH_PKCE_HTTP_${exchanged.status || 0}`);
+      }
+      const nowSeconds = Math.floor(Number(nowMs()) / 1000);
+      const claims = validateMagicLinkAccessToken(exchanged.value.access_token, config, nowSeconds);
+      const sessionValue = normalizeSession({
+        ...exchanged.value,
+        expires_at: Number(exchanged.value.expires_at || claims?.exp),
+      });
+      if (!claims
+        || !sessionValue
+        || sessionValue.user.id !== String(claims.sub)
+        || !writeStoredSession(sessionValue)) {
+        return errorResult("SUPABASE_AUTH_CALLBACK_SESSION_INVALID");
+      }
+      currentSession = sessionValue;
+      emit("SIGNED_IN");
+      return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
+    }
+
+    async function establishMagicLinkSession(callbackSource) {
+      if (callbackConsumed) return errorResult("SUPABASE_AUTH_CALLBACK_ALREADY_CONSUMED");
+      callbackConsumed = true;
+      const parsed = parseMagicLinkCallback(callbackSource, MAGIC_LINK_CALLBACK_URL);
+      if (!parsed.ok) return parsed;
+      const result = parsed.mode === "implicit"
+        ? await setSession({ access_token: parsed.accessToken, refresh_token: parsed.refreshToken })
+        : await exchangeCodeForSession(parsed.authCode);
+      if (!result.ok) return result;
+      return Object.freeze({ ok: true, code: "", callback: parsed.mode, session: result.session });
     }
 
     async function refreshSession() {
@@ -279,6 +584,9 @@
 
     return Object.freeze({
       signInWithPassword,
+      setSession,
+      exchangeCodeForSession,
+      establishMagicLinkSession,
       signOut,
       restoreSession,
       refreshSession,
@@ -294,6 +602,9 @@
     const unavailable = () => Promise.resolve(errorResult(code));
     return Object.freeze({
       signInWithPassword: unavailable,
+      setSession: unavailable,
+      exchangeCodeForSession: unavailable,
+      establishMagicLinkSession: unavailable,
       signOut: unavailable,
       restoreSession: unavailable,
       refreshSession: unavailable,
@@ -363,8 +674,10 @@
       return status;
     }
 
-    async function initialize() {
-      const restored = await provider.restoreSession();
+    async function initialize(callbackSource = null) {
+      const restored = callbackSource
+        ? await provider.establishMagicLinkSession(callbackSource)
+        : await provider.restoreSession();
       ownerVerified = false;
       authorizationPhase = "idle";
       lastCode = restored.ok ? "SUPABASE_AUTH_OWNER_GATE_REQUIRED" : restored.code;
@@ -508,7 +821,22 @@
     });
     browserRoot.MaterialsQuoteSupabaseRuntime = integration;
     browserRoot.MaterialsQuoteSupabaseSyncConfig = integration.getSyncConfiguration();
-    integration.initialize();
+    let callbackSource = browserRoot.MaterialsQuoteSupabaseAuthCallback || null;
+    try {
+      delete browserRoot.MaterialsQuoteSupabaseAuthCallback;
+    } catch (error) {
+      try {
+        browserRoot.MaterialsQuoteSupabaseAuthCallback = null;
+      } catch (ignored) {
+        // The provider still enforces a single callback consumption.
+      }
+    }
+    Promise.resolve(integration.initialize(callbackSource)).then((result) => {
+      callbackSource = null;
+      if (result?.ok === true && result.callback && browserRoot.location) {
+        browserRoot.location.hash = "#/settings/company";
+      }
+    });
     if (config && typeof browserRoot.addEventListener === "function") {
       browserRoot.addEventListener("storage", (event) => {
         if (event?.key === provider.sessionStorageKey) integration.initialize();
@@ -519,6 +847,10 @@
 
   return Object.freeze({
     FORMAL_PUSH_CONFIRMATION,
+    AUTH_RUNTIME_VERSION,
+    MAGIC_LINK_CALLBACK_URL,
+    parseMagicLinkCallback,
+    validateMagicLinkAccessToken,
     createSupabaseAuthProvider,
     createRuntimeAuthIntegration,
     bootstrapBrowserRuntime,
