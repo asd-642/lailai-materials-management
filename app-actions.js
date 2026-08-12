@@ -2478,6 +2478,17 @@ const SUPABASE_RUNTIME_AUTH_STATUS_MESSAGES = Object.freeze({
   SUPABASE_AUTH_SIGNED_OUT: "尚未登入 Supabase帳號；這與本機管理員／老闆 PIN 完全分離。",
   SUPABASE_AUTH_OWNER_GATE_REQUIRED: "Supabase帳號 session 已恢復；正式流程前仍須重新驗證 organization owner。",
   SUPABASE_AUTH_OWNER_REQUIRED: "目前 Supabase帳號不是指定 organization 的 owner，正式推送已拒絕。",
+  SUPABASE_AUTH_MEMBERSHIP_INVALID: "目前 Supabase帳號尚無 organization membership；只有遠端完全未初始化時才可建立首位 owner。",
+  SUPABASE_AUTH_OWNER_BOOTSTRAP_IN_FLIGHT: "正在原子建立首位 Supabase owner；請勿重複操作。",
+  SUPABASE_AUTH_OWNER_BOOTSTRAP_ALREADY_CONSUMED: "本頁首位 owner 建立要求已消耗；不得重試。",
+  SUPABASE_AUTH_OWNER_BOOTSTRAP_NOT_AVAILABLE: "首位 owner 建立條件不成立，已拒絕。",
+  SUPABASE_AUTH_OWNER_BOOTSTRAP_CLOSED: "遠端已存在 profile、membership 或 owner；首位 owner 建立流程永久關閉。",
+  SUPABASE_AUTH_OWNER_BOOTSTRAP_AUTH_REQUIRED: "只有目前已登入的 Supabase Auth 使用者可建立自己的首位 owner membership。",
+  SUPABASE_AUTH_OWNER_BOOTSTRAP_EMAIL_REQUIRED: "目前 Supabase Auth session 缺少可驗證 Email，首位 owner 建立已拒絕。",
+  SUPABASE_AUTH_OWNER_BOOTSTRAP_ORGANIZATION_NOT_FOUND: "正式 organization 尚未建立，首位 owner 建立已拒絕。",
+  SUPABASE_AUTH_OWNER_BOOTSTRAP_DENIED: "Supabase 拒絕首位 owner 建立要求；未變更本機資料。",
+  SUPABASE_AUTH_OWNER_BOOTSTRAP_RESULT_INVALID: "首位 owner 建立回覆不符合固定契約，已停止。",
+  SUPABASE_AUTH_OWNER_BOOTSTRAP_POSTCHECK_FAILED: "首位 owner 建立後無法通過 owner 唯讀驗證；請停止且不得重試。",
   SUPABASE_AUTH_ORGANIZATION_MISMATCH: "Supabase Auth organization 與公開設定不一致，正式推送已拒絕。",
   SUPABASE_AUTH_TOKEN_EXPIRED: "Supabase Auth 權杖已過期或失效，正式推送已拒絕。",
   SUPABASE_AUTH_SESSION_EXPIRED: "Supabase Auth session 已過期且無法安全更新，請重新登入。",
@@ -2558,6 +2569,22 @@ window.verifySupabaseOwnerMembership = async function () {
   const runtime = window.MaterialsQuoteSupabaseRuntime;
   if (!runtime || typeof runtime.verifyOwnerMembership !== "function") return { ok: false, code: "SUPABASE_AUTH_RUNTIME_UNAVAILABLE" };
   const result = await runtime.verifyOwnerMembership();
+  const finalStatus = refreshSupabaseRuntimeStatusUi();
+  showBackupDownloadToastWithoutRender(finalStatus.message);
+  return result;
+};
+
+window.bootstrapSupabaseFirstOwner = async function () {
+  const runtime = window.MaterialsQuoteSupabaseRuntime;
+  const status = typeof runtime?.status === "function" ? runtime.status() : null;
+  if (!runtime || typeof runtime.bootstrapFirstOwner !== "function" || status?.canBootstrapFirstOwner !== true) {
+    const result = { ok: false, code: "SUPABASE_AUTH_OWNER_BOOTSTRAP_NOT_AVAILABLE" };
+    showBackupDownloadToastWithoutRender(SUPABASE_RUNTIME_AUTH_STATUS_MESSAGES[result.code]);
+    return result;
+  }
+  const confirmed = window.confirm("只有遠端 profiles、memberships 與 owner 全部為 0 時，才會將目前已登入的 Supabase Auth 使用者原子建立為唯一首位 owner。此動作不接受其他使用者 ID，且本頁只能嘗試一次。確定繼續？");
+  if (!confirmed) return { ok: false, code: "SUPABASE_AUTH_OWNER_BOOTSTRAP_CANCELLED" };
+  const result = await runtime.bootstrapFirstOwner();
   const finalStatus = refreshSupabaseRuntimeStatusUi();
   showBackupDownloadToastWithoutRender(finalStatus.message);
   return result;

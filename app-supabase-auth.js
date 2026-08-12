@@ -7,7 +7,7 @@
   "use strict";
 
   const FORMAL_PUSH_CONFIRMATION = "啟用唯一正式推送";
-  const AUTH_RUNTIME_VERSION = "20260812-project-rename-phase-a-001";
+  const AUTH_RUNTIME_VERSION = "20260812-authenticated-owner-bootstrap-001";
   const SESSION_REFRESH_MARGIN_SECONDS = 60;
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const MAGIC_LINK_CALLBACK_ROOT_URL = "https://asd-642.github.io/lailai-materials-management/";
@@ -665,6 +665,31 @@
       return Object.freeze({ ok: true, code: "", role: "owner", organizationId });
     }
 
+    async function bootstrapFirstOwner() {
+      const accessToken = await getAccessToken();
+      if (!accessToken) return errorResult("SUPABASE_AUTH_SIGNED_OUT");
+      const response = await post("/rest/v1/rpc/bootstrap_authenticated_first_owner_v1", {}, accessToken);
+      if (!response.ok) {
+        if (response.status === 401) return errorResult("SUPABASE_AUTH_TOKEN_EXPIRED");
+        if (response.status === 403) return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_DENIED");
+        return errorResult(`SUPABASE_AUTH_OWNER_BOOTSTRAP_HTTP_${response.status || 0}`);
+      }
+      const value = response.value && typeof response.value === "object" ? response.value : null;
+      if (!value || value.ok !== true) {
+        const code = String(value?.code || "");
+        if (code === "BOOTSTRAP_CLOSED") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_CLOSED");
+        if (code === "AUTH_REQUIRED") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_AUTH_REQUIRED");
+        if (code === "AUTH_EMAIL_REQUIRED") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_EMAIL_REQUIRED");
+        if (code === "ORGANIZATION_NOT_FOUND") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_ORGANIZATION_NOT_FOUND");
+        return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_RESULT_INVALID");
+      }
+      if (String(value.organization_id || "").toLowerCase() !== organizationId
+        || String(value.role || "") !== "owner") {
+        return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_RESULT_INVALID");
+      }
+      return Object.freeze({ ok: true, code: "", role: "owner", organizationId });
+    }
+
     async function signOut() {
       if (!currentSession) currentSession = readStoredSession();
       const accessToken = currentSession?.access_token || "";
@@ -696,6 +721,7 @@
       refreshSession,
       getAccessToken,
       verifyOwnerMembership,
+      bootstrapFirstOwner,
       onAuthStateChange,
       status,
       sessionStorageKey: sessionKey,
@@ -714,6 +740,7 @@
       refreshSession: unavailable,
       getAccessToken: async () => "",
       verifyOwnerMembership: unavailable,
+      bootstrapFirstOwner: unavailable,
       onAuthStateChange: () => Object.freeze({ unsubscribe() {} }),
       status: () => Object.freeze({ configured: false, signedIn: false, user: null, expiresAt: null, sessionStorageKey: "" }),
       sessionStorageKey: "",
@@ -727,6 +754,7 @@
     const callbackDiagnostics = createCallbackDiagnosticStore(callbackDiagnosticStorage);
     let ownerVerified = false;
     let authorizationPhase = "idle";
+    let ownerBootstrapPhase = "idle";
     let lastCode = publicConfig ? "SUPABASE_AUTH_SIGNED_OUT" : "SUPABASE_PUBLIC_CONFIG_REQUIRED";
     let callbackStage = "";
     let lastPushResult = null;
@@ -751,6 +779,13 @@
 
     function publicStatus() {
       const auth = provider.status();
+      const canBootstrapFirstOwner = Boolean(
+        publicConfig
+        && auth.signedIn
+        && !ownerVerified
+        && ownerBootstrapPhase === "idle"
+        && lastCode === "SUPABASE_AUTH_MEMBERSHIP_INVALID"
+      );
       return Object.freeze({
         configured: Boolean(publicConfig && auth.configured),
         configCode: publicConfig ? "" : "SUPABASE_PUBLIC_CONFIG_REQUIRED",
@@ -761,6 +796,8 @@
         phase: authorizationPhase,
         canAuthorize: Boolean(publicConfig && auth.signedIn && ownerVerified && authorizationPhase === "idle"),
         canPush: Boolean(publicConfig && auth.signedIn && ownerVerified && authorizationPhase === "authorized"),
+        canBootstrapFirstOwner,
+        ownerBootstrapPhase,
         code: String(lastCode || ""),
         callbackStage,
         lastPushOk: lastPushResult?.ok === true,
@@ -814,6 +851,7 @@
       callbackStage = "";
       authorizationPhase = "idle";
       ownerVerified = false;
+      if (ownerBootstrapPhase !== "consumed") ownerBootstrapPhase = "idle";
       lastPushResult = null;
       const signedIn = await provider.signInWithPassword(email, password);
       if (!signedIn.ok) {
@@ -851,6 +889,37 @@
       if (!gate.ok) authorizationPhase = authorizationPhase === "consumed" ? "consumed" : "idle";
       publish();
       return gate;
+    }
+
+    async function bootstrapFirstOwner() {
+      const auth = provider.status();
+      if (!publicConfig) return errorResult("SUPABASE_PUBLIC_CONFIG_REQUIRED");
+      if (!auth.signedIn) return errorResult("SUPABASE_AUTH_SIGNED_OUT");
+      if (ownerBootstrapPhase === "in-flight") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_IN_FLIGHT");
+      if (ownerBootstrapPhase === "consumed") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_ALREADY_CONSUMED");
+      if (ownerVerified || lastCode !== "SUPABASE_AUTH_MEMBERSHIP_INVALID") {
+        return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_NOT_AVAILABLE");
+      }
+      ownerBootstrapPhase = "in-flight";
+      lastCode = "SUPABASE_AUTH_OWNER_BOOTSTRAP_IN_FLIGHT";
+      publish();
+      const created = await provider.bootstrapFirstOwner();
+      ownerBootstrapPhase = "consumed";
+      if (!created.ok) {
+        ownerVerified = false;
+        lastCode = created.code;
+        publish();
+        return created;
+      }
+      const gate = await provider.verifyOwnerMembership();
+      ownerVerified = gate.ok === true;
+      lastCode = gate.ok
+        ? "SUPABASE_FORMAL_PUSH_CONFIRMATION_REQUIRED"
+        : "SUPABASE_AUTH_OWNER_BOOTSTRAP_POSTCHECK_FAILED";
+      publish();
+      return gate.ok
+        ? Object.freeze({ ok: true, code: "", role: "owner", organizationId: String(publicConfig.organizationId || "") })
+        : errorResult(lastCode);
     }
 
     async function authorizeFormalPushOnce({ confirmation, artifactGatesAccepted } = {}) {
@@ -923,6 +992,7 @@
       signInWithPassword,
       signOut,
       verifyOwnerMembership,
+      bootstrapFirstOwner,
       authorizeFormalPushOnce,
       executeFormalPush,
       getSyncConfiguration: syncConfiguration,

@@ -308,6 +308,14 @@ function renderAuthoritativeSyncPanel() {
           <button class="btn" type="button" onclick="signInSupabaseAccount()">登入 Supabase帳號並驗證 owner</button>
         </div>
       </div>`;
+  const ownerBootstrapControls = auth.signedIn && auth.canBootstrapFirstOwner
+    ? `<div class="form-grid" data-supabase-owner-bootstrap>
+        <div class="hint amber">遠端目前沒有這個 Supabase帳號的 membership。只有 profiles、memberships 與 owner 全部為 0 時，伺服器才會將目前登入者建立為唯一首位 owner；不得指定其他 UUID 或 Email，任何非空狀態都會整筆拒絕。</div>
+        <div class="backup-actions">
+          <button class="btn danger" type="button" onclick="bootstrapSupabaseFirstOwner()">建立目前登入者為首位 Supabase owner</button>
+        </div>
+      </div>`
+    : "";
   const formalControls = auth.signedIn && auth.ownerVerified
     ? `<div class="form-grid" data-supabase-formal-gate>
         <div class="hint amber">只有 09 已完成 A–E（pre-push gate、Auth owner gate、post-push artifact 已鎖定）後，才可在本頁建立一次性授權。授權只存在記憶體，任何結果皆不可重試。</div>
@@ -327,6 +335,7 @@ function renderAuthoritativeSyncPanel() {
       <div class="card-body">
         <div class="hint ${auth.ownerVerified ? "green" : "amber"}" data-supabase-auth-status role="status" aria-live="polite">${h(auth.message)}</div>
         ${auth.configured ? signedInControls : `<p class="sub">公開 project URL、publishable key、project ref 與 organization 尚未由 09 注入並驗證；所有遠端要求均維持 0。</p>`}
+        ${ownerBootstrapControls}
         ${formalControls}
         <div class="hint ${status.phase === "success" ? "green" : "amber"}" data-authoritative-sync-status role="status" aria-live="polite">${h(status.message)}</div>
         <p class="sub">此階段只提供「本機 → Supabase」單向 push，不提供 pull 或 merge。遠端空白、organization、revision、hash、counts、idempotency 或 owner 授權任一不符時，整筆拒絕且不會部分寫入。</p>
