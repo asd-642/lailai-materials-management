@@ -6,12 +6,15 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function (root) {
   "use strict";
 
-  const RECOVERY_RUNTIME_VERSION = "20260811-supabase-password-recovery-001";
+  const RECOVERY_RUNTIME_VERSION = "20260812-supabase-password-recovery-request-002";
   const FORMAL_SITE_BASE_URL = "https://asd-642.github.io/my-scuba-site/materials-site-preview-20260617/";
   const PASSWORD_RECOVERY_REDIRECT_URL = `${FORMAL_SITE_BASE_URL}supabase-password-recovery.html`;
   const PASSWORD_RECOVERY_SUCCESS_URL = `${FORMAL_SITE_BASE_URL}index.html#/login`;
   const PASSWORD_MIN_LENGTH = 8;
   const PASSWORD_MAX_LENGTH = 128;
+  const EMAIL_MAX_LENGTH = 254;
+  const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const RECOVERY_REQUEST_NEUTRAL_MESSAGE = "若帳號存在，請查看最新重設信";
   const CALLBACK_MAX_LENGTH = 16384;
   const TOKEN_MAX_LENGTH = 8192;
   const PROJECT_REF_PATTERN = /^[a-z0-9]{20}$/;
@@ -276,6 +279,7 @@
     let accessToken = "";
     let phase = configured ? "idle" : "invalid";
     let lastCode = configured ? "" : "SUPABASE_RECOVERY_CONFIGURATION_INVALID";
+    let recoveryRequestConsumed = false;
 
     function clearSensitive() {
       accessToken = "";
@@ -288,6 +292,7 @@
         code: lastCode,
         ready: phase === "ready",
         hasSensitiveContext: accessToken !== "",
+        recoveryRequestConsumed,
       });
     }
 
@@ -386,6 +391,39 @@
       return Object.freeze({ ok: true, code: "", state: "ready" });
     }
 
+    async function resetPasswordForEmail(email, { redirectTo } = {}) {
+      if (!configured) return resultError("SUPABASE_RECOVERY_CONFIGURATION_INVALID", "request-unavailable");
+      if (!["invalid", "expired"].includes(phase)) {
+        const code = phase === "request-pending"
+          ? "SUPABASE_RECOVERY_REQUEST_IN_FLIGHT"
+          : "SUPABASE_RECOVERY_REQUEST_NOT_AVAILABLE";
+        return resultError(code, phase);
+      }
+      if (recoveryRequestConsumed) return resultError("SUPABASE_RECOVERY_REQUEST_ALREADY_CONSUMED", phase);
+      const normalizedEmail = String(email || "").trim().toLowerCase();
+      if (normalizedEmail.length > EMAIL_MAX_LENGTH || !EMAIL_PATTERN.test(normalizedEmail)) {
+        return resultError("SUPABASE_RECOVERY_EMAIL_INVALID", "request");
+      }
+      if (String(redirectTo || "") !== PASSWORD_RECOVERY_REDIRECT_URL) {
+        return resultError("SUPABASE_RECOVERY_REDIRECT_INVALID", "request");
+      }
+
+      recoveryRequestConsumed = true;
+      phase = "request-pending";
+      lastCode = "";
+      const path = `/auth/v1/recover?redirect_to=${encodeURIComponent(PASSWORD_RECOVERY_REDIRECT_URL)}`;
+      const sent = await authRequest(path, "POST", { email: normalizedEmail });
+      phase = "request-complete";
+      const accepted = sent.ok === true && sent.status === 200;
+      lastCode = accepted ? "" : "SUPABASE_RECOVERY_REQUEST_RESULT_PRIVATE";
+      return Object.freeze({
+        ok: accepted,
+        code: lastCode,
+        state: "request-complete",
+        message: RECOVERY_REQUEST_NEUTRAL_MESSAGE,
+      });
+    }
+
     function validatePasswords(password, confirmation) {
       const next = String(password || "");
       const repeated = String(confirmation || "");
@@ -432,6 +470,7 @@
 
     return Object.freeze({
       establishRecovery,
+      resetPasswordForEmail,
       updatePassword,
       clearSensitive,
       status,
@@ -453,6 +492,9 @@
     const document = browserRoot.document;
     const statusNode = document.getElementById("recovery-status");
     const form = document.getElementById("recovery-form");
+    const requestForm = document.getElementById("recovery-request-form");
+    const requestEmailInput = document.getElementById("recovery-request-email");
+    const requestSubmitButton = document.getElementById("recovery-request-submit");
     const passwordInput = document.getElementById("recovery-password");
     const confirmationInput = document.getElementById("recovery-password-confirmation");
     const submitButton = document.getElementById("recovery-submit");
@@ -462,23 +504,27 @@
     const fetchImpl = typeof browserRoot.fetch === "function" ? browserRoot.fetch.bind(browserRoot) : null;
     const client = createRecoveryClient({ config, fetchImpl });
 
-    function render(state, code = "") {
-      if (!statusNode || !form) return;
+    function render(state) {
+      if (!statusNode || !form || !requestForm) return;
       const messages = {
         validating: "正在驗證密碼重設連結…",
         ready: "連結已驗證。請輸入新的 Supabase 帳號密碼。",
         updating: "正在安全更新密碼…",
         success: "密碼已更新，正在返回正式網站登入頁。",
-        expired: "此密碼重設連結已過期或已使用，請重新申請。",
         invalid: "此密碼重設連結無效，未進行任何變更。",
         "update-failed": "密碼更新失敗。請確認密碼規則後再試一次。",
+        request: "請輸入 Supabase 帳號 Email 以取得新的密碼重設信。",
+        "request-input-error": "請輸入有效的 Supabase 帳號 Email。",
+        "request-pending": "正在送出密碼重設要求…",
+        "request-complete": RECOVERY_REQUEST_NEUTRAL_MESSAGE,
       };
       statusNode.textContent = messages[state] || messages.invalid;
       statusNode.dataset.state = state;
-      statusNode.dataset.code = String(code || "");
       form.hidden = state !== "ready" && state !== "update-failed";
+      requestForm.hidden = state !== "request" && state !== "request-input-error";
       if (submitButton) submitButton.disabled = state === "updating";
-      if (loginLink) loginLink.hidden = !["expired", "invalid"].includes(state);
+      if (requestSubmitButton) requestSubmitButton.disabled = state === "request-pending" || state === "request-complete";
+      if (loginLink) loginLink.hidden = !["invalid", "request-complete"].includes(state);
     }
 
     const runtime = Object.freeze({
@@ -492,7 +538,7 @@
       const established = await client.establishRecovery(callbackSource);
       callbackSource = null;
       if (!established.ok) {
-        render(established.state === "expired" ? "expired" : "invalid", established.code);
+        render(established.code === "SUPABASE_RECOVERY_CONFIGURATION_INVALID" ? "invalid" : "request");
         return;
       }
       render("ready");
@@ -508,11 +554,24 @@
         if (passwordInput) passwordInput.value = "";
         if (confirmationInput) confirmationInput.value = "";
         if (!result.ok) {
-          render(result.state === "expired" ? "expired" : "update-failed", result.code);
+          render(result.state === "expired" ? "request" : "update-failed");
           return;
         }
         render("success");
         browserRoot.setTimeout(() => browserRoot.location.replace(PASSWORD_RECOVERY_SUCCESS_URL), 1200);
+      });
+    }
+    if (requestForm) {
+      requestForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (client.status().phase === "request-pending" || client.status().recoveryRequestConsumed) return;
+        const email = String(requestEmailInput?.value || "");
+        if (requestEmailInput) requestEmailInput.value = "";
+        render("request-pending");
+        const result = await client.resetPasswordForEmail(email, {
+          redirectTo: PASSWORD_RECOVERY_REDIRECT_URL,
+        });
+        render(result.code === "SUPABASE_RECOVERY_EMAIL_INVALID" ? "request-input-error" : "request-complete");
       });
     }
     return runtime;
@@ -525,6 +584,8 @@
     PASSWORD_RECOVERY_SUCCESS_URL,
     PASSWORD_MIN_LENGTH,
     PASSWORD_MAX_LENGTH,
+    EMAIL_MAX_LENGTH,
+    RECOVERY_REQUEST_NEUTRAL_MESSAGE,
     parseRecoveryCallback,
     captureAndRedactLocation,
     validateRecoveryAccessToken,
