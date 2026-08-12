@@ -7,7 +7,7 @@
   "use strict";
 
   const FORMAL_PUSH_CONFIRMATION = "啟用唯一正式推送";
-  const AUTH_RUNTIME_VERSION = "20260812-magic-link-root-equivalence-002";
+  const AUTH_RUNTIME_VERSION = "20260812-callback-status-003";
   const SESSION_REFRESH_MARGIN_SECONDS = 60;
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const MAGIC_LINK_CALLBACK_ROOT_URL = "https://asd-642.github.io/my-scuba-site/materials-site-preview-20260617/";
@@ -19,6 +19,20 @@
     "/my-scuba-site/materials-site-preview-20260617/",
     "/my-scuba-site/materials-site-preview-20260617/index.html",
   ]));
+  const CALLBACK_DIAGNOSTIC_STORAGE_KEY = "materials_quote_supabase_callback_status_v1";
+  const CALLBACK_DIAGNOSTIC_SCHEMA = "materials-quote-supabase-callback-status/v1";
+  const CALLBACK_DIAGNOSTIC_STATUSES = Object.freeze({
+    noCallback: Object.freeze({ code: "SUPABASE_AUTH_CALLBACK_NOT_PRESENT", stage: "bridge" }),
+    shape: Object.freeze({ code: "SUPABASE_AUTH_CALLBACK_SHAPE_REJECTED", stage: "callback-shape" }),
+    pkce: Object.freeze({ code: "SUPABASE_AUTH_CALLBACK_PKCE_REJECTED", stage: "pkce" }),
+    project: Object.freeze({ code: "SUPABASE_AUTH_CALLBACK_PROJECT_IDENTITY_REJECTED", stage: "project-identity" }),
+    user: Object.freeze({ code: "SUPABASE_AUTH_CALLBACK_USER_PROBE_REJECTED", stage: "user-probe" }),
+    storage: Object.freeze({ code: "SUPABASE_AUTH_CALLBACK_STORAGE_REJECTED", stage: "session-storage" }),
+    success: Object.freeze({ code: "SUPABASE_AUTH_CALLBACK_SUCCESS", stage: "complete" }),
+  });
+  const CALLBACK_DIAGNOSTIC_BY_CODE = Object.freeze(new Map(
+    Object.values(CALLBACK_DIAGNOSTIC_STATUSES).map((value) => [value.code, value]),
+  ));
   const CALLBACK_MAX_LENGTH = 16384;
   const TOKEN_MAX_LENGTH = 8192;
   const PROJECT_REF_PATTERN = /^[a-z0-9]{20}$/;
@@ -45,6 +59,81 @@
 
   function hasOwn(value, key) {
     return Object.prototype.hasOwnProperty.call(value, key);
+  }
+
+  function createCallbackDiagnosticStore(storage) {
+    let inMemory = null;
+
+    function normalize(value) {
+      if (!isRecord(value)
+        || value.schema !== CALLBACK_DIAGNOSTIC_SCHEMA
+        || Object.keys(value).sort().join(",") !== "code,schema,stage") return null;
+      const allowed = CALLBACK_DIAGNOSTIC_BY_CODE.get(String(value.code || ""));
+      if (!allowed || allowed.stage !== String(value.stage || "")) return null;
+      return Object.freeze({ schema: CALLBACK_DIAGNOSTIC_SCHEMA, code: allowed.code, stage: allowed.stage });
+    }
+
+    function read() {
+      if (inMemory) return inMemory;
+      if (!storage || typeof storage.getItem !== "function") return null;
+      try {
+        const raw = storage.getItem(CALLBACK_DIAGNOSTIC_STORAGE_KEY);
+        inMemory = raw ? normalize(JSON.parse(raw)) : null;
+      } catch (error) {
+        inMemory = null;
+      }
+      return inMemory;
+    }
+
+    function write(statusValue) {
+      const allowed = CALLBACK_DIAGNOSTIC_BY_CODE.get(String(statusValue?.code || ""));
+      if (!allowed || allowed.stage !== String(statusValue?.stage || "")) return read();
+      inMemory = Object.freeze({ schema: CALLBACK_DIAGNOSTIC_SCHEMA, code: allowed.code, stage: allowed.stage });
+      if (storage && typeof storage.setItem === "function") {
+        try {
+          storage.setItem(CALLBACK_DIAGNOSTIC_STORAGE_KEY, JSON.stringify(inMemory));
+        } catch (error) {
+          // The in-memory enum remains available without exposing callback data.
+        }
+      }
+      return inMemory;
+    }
+
+    function clear() {
+      inMemory = null;
+      if (storage && typeof storage.removeItem === "function") {
+        try {
+          storage.removeItem(CALLBACK_DIAGNOSTIC_STORAGE_KEY);
+        } catch (error) {
+          // A denied cleanup does not alter Auth state.
+        }
+      }
+    }
+
+    return Object.freeze({ read, write, clear });
+  }
+
+  function callbackDiagnosticForResult(callbackSource, result) {
+    if (!callbackSource) return CALLBACK_DIAGNOSTIC_STATUSES.noCallback;
+    if (result?.ok === true) return CALLBACK_DIAGNOSTIC_STATUSES.success;
+    const code = String(result?.code || "");
+    const stage = String(result?.callbackStage || "");
+    if (stage === "pkce" || code === "SUPABASE_AUTH_PKCE_CONTEXT_UNAVAILABLE" || code.startsWith("SUPABASE_AUTH_PKCE_HTTP_")) {
+      return CALLBACK_DIAGNOSTIC_STATUSES.pkce;
+    }
+    if (stage === "project-identity" || code === "SUPABASE_AUTH_CALLBACK_PROJECT_IDENTITY_INVALID") {
+      return CALLBACK_DIAGNOSTIC_STATUSES.project;
+    }
+    if (stage === "session-storage" || code === "SUPABASE_AUTH_SESSION_STORAGE_FAILED") {
+      return CALLBACK_DIAGNOSTIC_STATUSES.storage;
+    }
+    if (stage === "user-probe"
+      || code === "SUPABASE_AUTH_CALLBACK_USER_INVALID"
+      || code === "SUPABASE_AUTH_NETWORK_ERROR"
+      || code === "SUPABASE_AUTH_RESPONSE_IDENTITY_INVALID") {
+      return CALLBACK_DIAGNOSTIC_STATUSES.user;
+    }
+    return CALLBACK_DIAGNOSTIC_STATUSES.shape;
   }
 
   function decodeBase64UrlJson(segment) {
@@ -256,6 +345,7 @@
     let currentSession = null;
     let refreshing = null;
     let callbackConsumed = false;
+    let lastSessionReadStatus = "missing";
 
     function emit(event) {
       const snapshot = safeSession(currentSession);
@@ -269,10 +359,21 @@
     }
 
     function readStoredSession() {
-      if (!sessionStorage || !sessionKey) return null;
+      if (!sessionStorage || !sessionKey) {
+        lastSessionReadStatus = "unavailable";
+        return null;
+      }
       try {
-        return normalizeSession(JSON.parse(sessionStorage.getItem(sessionKey) || "null"));
+        const raw = sessionStorage.getItem(sessionKey);
+        if (!raw) {
+          lastSessionReadStatus = "missing";
+          return null;
+        }
+        const value = normalizeSession(JSON.parse(raw));
+        lastSessionReadStatus = value ? "ok" : "invalid";
+        return value;
       } catch (error) {
+        lastSessionReadStatus = "failed";
         return null;
       }
     }
@@ -436,12 +537,11 @@
         ...exchanged.value,
         expires_at: Number(exchanged.value.expires_at || claims?.exp),
       });
-      if (!claims
-        || !sessionValue
-        || sessionValue.user.id !== String(claims.sub)
-        || !writeStoredSession(sessionValue)) {
-        return errorResult("SUPABASE_AUTH_CALLBACK_SESSION_INVALID");
+      if (!claims) return errorResult("SUPABASE_AUTH_CALLBACK_PROJECT_IDENTITY_INVALID");
+      if (!sessionValue || sessionValue.user.id !== String(claims.sub)) {
+        return errorResult("SUPABASE_AUTH_CALLBACK_USER_INVALID");
       }
+      if (!writeStoredSession(sessionValue)) return errorResult("SUPABASE_AUTH_SESSION_STORAGE_FAILED");
       currentSession = sessionValue;
       emit("SIGNED_IN");
       return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
@@ -451,11 +551,17 @@
       if (callbackConsumed) return errorResult("SUPABASE_AUTH_CALLBACK_ALREADY_CONSUMED");
       callbackConsumed = true;
       const parsed = parseMagicLinkCallback(callbackSource);
-      if (!parsed.ok) return parsed;
+      if (!parsed.ok) return Object.freeze({ ...parsed, callbackStage: "callback-shape" });
       const result = parsed.mode === "implicit"
         ? await setSession({ access_token: parsed.accessToken, refresh_token: parsed.refreshToken })
         : await exchangeCodeForSession(parsed.authCode);
-      if (!result.ok) return result;
+      if (!result.ok) {
+        const code = String(result.code || "");
+        let callbackStage = parsed.mode === "pkce" ? "pkce" : "user-probe";
+        if (code === "SUPABASE_AUTH_CALLBACK_PROJECT_IDENTITY_INVALID") callbackStage = "project-identity";
+        else if (code === "SUPABASE_AUTH_SESSION_STORAGE_FAILED") callbackStage = "session-storage";
+        return Object.freeze({ ...result, callbackStage });
+      }
       return Object.freeze({ ok: true, code: "", callback: parsed.mode, session: result.session });
     }
 
@@ -493,7 +599,9 @@
       if (!stored) {
         clearStoredSession();
         emit("INITIAL_SESSION");
-        return errorResult("SUPABASE_AUTH_SIGNED_OUT");
+        return errorResult(["invalid", "failed", "unavailable"].includes(lastSessionReadStatus)
+          ? "SUPABASE_AUTH_SESSION_STORAGE_FAILED"
+          : "SUPABASE_AUTH_SIGNED_OUT");
       }
       currentSession = stored;
       if (!sessionIsFresh(currentSession)) return refreshSession();
@@ -612,13 +720,15 @@
     });
   }
 
-  function createRuntimeAuthIntegration({ config, authProvider, configApi, fetchImpl, eventTarget } = {}) {
+  function createRuntimeAuthIntegration({ config, authProvider, configApi, fetchImpl, eventTarget, callbackDiagnosticStorage } = {}) {
     const provider = authProvider || createUnavailableProvider("SUPABASE_PUBLIC_CONFIG_REQUIRED");
     const publicConfig = config && typeof config === "object" ? config : null;
     const target = eventTarget || null;
+    const callbackDiagnostics = createCallbackDiagnosticStore(callbackDiagnosticStorage);
     let ownerVerified = false;
     let authorizationPhase = "idle";
     let lastCode = publicConfig ? "SUPABASE_AUTH_SIGNED_OUT" : "SUPABASE_PUBLIC_CONFIG_REQUIRED";
+    let callbackStage = "";
     let lastPushResult = null;
 
     function syncConfiguration(enabled = authorizationPhase === "authorized" || authorizationPhase === "in-flight") {
@@ -652,6 +762,7 @@
         canAuthorize: Boolean(publicConfig && auth.signedIn && ownerVerified && authorizationPhase === "idle"),
         canPush: Boolean(publicConfig && auth.signedIn && ownerVerified && authorizationPhase === "authorized"),
         code: String(lastCode || ""),
+        callbackStage,
         lastPushOk: lastPushResult?.ok === true,
       });
     }
@@ -671,17 +782,36 @@
     }
 
     async function initialize(callbackSource = null) {
+      const hadCallback = Boolean(callbackSource);
       const restored = callbackSource
         ? await provider.establishMagicLinkSession(callbackSource)
         : await provider.restoreSession();
       ownerVerified = false;
       authorizationPhase = "idle";
-      lastCode = restored.ok ? "SUPABASE_AUTH_OWNER_GATE_REQUIRED" : restored.code;
+      if (hadCallback) {
+        const diagnostic = callbackDiagnostics.write(callbackDiagnosticForResult(callbackSource, restored));
+        lastCode = diagnostic.code;
+        callbackStage = diagnostic.stage;
+      } else if (!restored.ok) {
+        const previous = callbackDiagnostics.read();
+        const diagnostic = previous || callbackDiagnostics.write(
+          restored.code === "SUPABASE_AUTH_SESSION_STORAGE_FAILED"
+            ? CALLBACK_DIAGNOSTIC_STATUSES.storage
+            : CALLBACK_DIAGNOSTIC_STATUSES.noCallback,
+        );
+        lastCode = diagnostic.code;
+        callbackStage = diagnostic.stage;
+      } else {
+        lastCode = "SUPABASE_AUTH_OWNER_GATE_REQUIRED";
+        callbackStage = "";
+      }
       publish();
       return restored;
     }
 
     async function signInWithPassword(email, password) {
+      callbackDiagnostics.clear();
+      callbackStage = "";
       authorizationPhase = "idle";
       ownerVerified = false;
       lastPushResult = null;
@@ -696,6 +826,9 @@
     }
 
     async function signOut() {
+      callbackDiagnostics.clear();
+      callbackStage = "";
+      lastCode = "SUPABASE_AUTH_SIGNED_OUT";
       authorizationPhase = "idle";
       ownerVerified = false;
       lastPushResult = null;
@@ -774,7 +907,11 @@
       if (event === "SIGNED_OUT") {
         ownerVerified = false;
         if (authorizationPhase !== "consumed") authorizationPhase = "idle";
-        lastCode = "SUPABASE_AUTH_SIGNED_OUT";
+        const diagnostic = CALLBACK_DIAGNOSTIC_BY_CODE.get(lastCode);
+        if (!diagnostic || diagnostic === CALLBACK_DIAGNOSTIC_STATUSES.success) {
+          lastCode = "SUPABASE_AUTH_SIGNED_OUT";
+          callbackStage = "";
+        }
       }
       publish();
     });
@@ -800,10 +937,16 @@
     const config = configApi?.getCurrentConfiguration?.() || null;
     const fetchImpl = typeof browserRoot.fetch === "function" ? browserRoot.fetch.bind(browserRoot) : null;
     let browserStorage = null;
+    let callbackDiagnosticStorage = null;
     try {
       browserStorage = browserRoot.localStorage;
     } catch (error) {
       browserStorage = null;
+    }
+    try {
+      callbackDiagnosticStorage = browserRoot.sessionStorage;
+    } catch (error) {
+      callbackDiagnosticStorage = null;
     }
     const provider = config
       ? createSupabaseAuthProvider({ config, fetchImpl, storage: browserStorage })
@@ -814,6 +957,7 @@
       configApi,
       fetchImpl,
       eventTarget: browserRoot,
+      callbackDiagnosticStorage,
     });
     browserRoot.MaterialsQuoteSupabaseRuntime = integration;
     browserRoot.MaterialsQuoteSupabaseSyncConfig = integration.getSyncConfiguration();
@@ -846,6 +990,8 @@
     AUTH_RUNTIME_VERSION,
     MAGIC_LINK_CALLBACK_URL,
     MAGIC_LINK_CALLBACK_URLS,
+    CALLBACK_DIAGNOSTIC_STORAGE_KEY,
+    CALLBACK_DIAGNOSTIC_STATUSES,
     parseMagicLinkCallback,
     validateMagicLinkAccessToken,
     createSupabaseAuthProvider,
