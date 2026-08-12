@@ -20,7 +20,7 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
-  const AUTH_CALLBACK_BRIDGE_VERSION = "20260813-recovery-root-callback-001";
+  const AUTH_CALLBACK_BRIDGE_VERSION = "20260813-recovery-callback-shape-telemetry-001";
   const CALLBACK_MAX_LENGTH = 16384;
   const TOKEN_MAX_LENGTH = 8192;
   const FORMAL_ORIGIN = "https://asd-642.github.io";
@@ -37,6 +37,23 @@
     "token_type",
     "type",
   ]));
+  const CALLBACK_TELEMETRY_PARAMETER_NAMES = Object.freeze([
+    "access_token",
+    "code",
+    "error",
+    "error_code",
+    "error_description",
+    "expires_at",
+    "expires_in",
+    "provider_refresh_token",
+    "provider_token",
+    "refresh_token",
+    "token",
+    "token_hash",
+    "token_type",
+    "type",
+  ]);
+  const CALLBACK_TELEMETRY_PARAMETER_SET = new Set(CALLBACK_TELEMETRY_PARAMETER_NAMES);
   const QUERY_INDICATOR = /(?:^|[?&])(code|error|error_code|error_description)=/;
   const FRAGMENT_INDICATOR = /(?:^|[#&])(access_token|refresh_token|type|error|error_code|error_description)=/;
 
@@ -44,6 +61,64 @@
     const query = String(search || "");
     const fragment = String(hash || "");
     return QUERY_INDICATOR.test(query) || FRAGMENT_INDICATOR.test(fragment);
+  }
+
+  function captureShapeTelemetry(search, hash) {
+    const query = String(search || "");
+    const fragment = String(hash || "");
+    const hasQuery = query !== "";
+    const hasHash = fragment !== "";
+    const presence = {
+      query: hasQuery,
+      hash: hasHash,
+      unknown: false,
+      duplicate: false,
+    };
+    for (const name of CALLBACK_TELEMETRY_PARAMETER_NAMES) presence[name] = false;
+    const parameterNames = new Set();
+
+    function inspect(raw, prefix) {
+      if (!raw) return;
+      if (!raw.startsWith(prefix)) {
+        presence.unknown = true;
+        parameterNames.add("unknown");
+        return;
+      }
+      const seen = new Set();
+      try {
+        const params = new URLSearchParams(raw.slice(1));
+        for (const [rawName] of params.entries()) {
+          const name = CALLBACK_TELEMETRY_PARAMETER_SET.has(rawName) ? rawName : "unknown";
+          if (seen.has(rawName)) presence.duplicate = true;
+          seen.add(rawName);
+          presence[name] = true;
+          parameterNames.add(name);
+        }
+      } catch (error) {
+        presence.unknown = true;
+        parameterNames.add("unknown");
+      }
+    }
+
+    inspect(query, "?");
+    inspect(fragment, "#");
+    return Object.freeze({
+      transport: hasQuery !== hasHash ? (hasQuery ? "query" : "hash") : "none",
+      parameterNames: Object.freeze(Array.from(parameterNames).sort()),
+      presence: Object.freeze(presence),
+      parseStage: "bridge",
+      rejectReason: "PENDING",
+    });
+  }
+
+  function telemetryOutcome(telemetry, parseStage, rejectReason) {
+    return Object.freeze({
+      transport: telemetry.transport,
+      parameterNames: telemetry.parameterNames,
+      presence: telemetry.presence,
+      parseStage,
+      rejectReason,
+    });
   }
 
   function strictRecoveryRedirect(location, search, hash) {
@@ -95,19 +170,35 @@
     const search = String(location.search || "");
     const hash = String(location.hash || "");
     if (!looksLikeAuthCallback(search, hash)) return null;
+    const telemetry = captureShapeTelemetry(search, hash);
 
     const recoveryRedirect = strictRecoveryRedirect(location, search, hash);
     if (recoveryRedirect) {
       try {
         history.replaceState(null, "", String(location.pathname || ""));
       } catch (error) {
-        return Object.freeze({ kind: "recovery-redirect", scrubbed: false, redirected: false });
+        return Object.freeze({
+          kind: "recovery-redirect",
+          scrubbed: false,
+          redirected: false,
+          telemetry: telemetryOutcome(telemetry, "bridge", "SCRUB_FAILED"),
+        });
       }
       try {
         location.replace(recoveryRedirect);
-        return Object.freeze({ kind: "recovery-redirect", scrubbed: true, redirected: true });
+        return Object.freeze({
+          kind: "recovery-redirect",
+          scrubbed: true,
+          redirected: true,
+          telemetry: telemetryOutcome(telemetry, "complete", "RECOVERY_ROUTED"),
+        });
       } catch (error) {
-        return Object.freeze({ kind: "recovery-redirect", scrubbed: true, redirected: false });
+        return Object.freeze({
+          kind: "recovery-redirect",
+          scrubbed: true,
+          redirected: false,
+          telemetry: telemetryOutcome(telemetry, "bridge", "RECOVERY_REDIRECT_FAILED"),
+        });
       }
     }
 
@@ -119,6 +210,7 @@
       hash: hash.length <= CALLBACK_MAX_LENGTH ? hash : "",
       oversized: search.length > CALLBACK_MAX_LENGTH || hash.length > CALLBACK_MAX_LENGTH,
       scrubbed: false,
+      telemetry,
     };
     try {
       history.replaceState(null, "", source.pathname);
@@ -133,6 +225,7 @@
     AUTH_CALLBACK_BRIDGE_VERSION,
     RECOVERY_REDIRECT_URL,
     looksLikeAuthCallback,
+    captureShapeTelemetry,
     captureAuthCallback,
   });
 });

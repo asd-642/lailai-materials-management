@@ -289,6 +289,16 @@ function renderAuthoritativeSyncPanel() {
         message: "Supabase 公開設定尚未完成；目前維持本機模式。",
       };
   const artifactContract = window.MaterialsQuoteSupabaseRuntimeConfig?.APPROVED_ARTIFACTS || {};
+  const callbackTelemetry = auth.callbackTelemetry && typeof auth.callbackTelemetry === "object"
+    ? auth.callbackTelemetry
+    : { transport: "none", parameterNames: [], presence: {}, parseStage: "bridge", rejectReason: "NOT_PRESENT" };
+  const callbackPresence = callbackTelemetry.presence && typeof callbackTelemetry.presence === "object"
+    ? callbackTelemetry.presence
+    : {};
+  const callbackParameterNames = Array.isArray(callbackTelemetry.parameterNames)
+    ? callbackTelemetry.parameterNames.join(",")
+    : "";
+  const callbackBoolean = (name) => callbackPresence[name] === true ? "1" : "0";
   const signedInControls = auth.signedIn
     ? `<div class="form-grid" data-supabase-auth-signed-in>
         <div class="hint green">Supabase帳號已登入：${h(auth.user?.email || "已驗證使用者")}</div>
@@ -330,7 +340,7 @@ function renderAuthoritativeSyncPanel() {
       </div>`
     : "";
   return `
-    <section class="card" data-authoritative-sync-panel data-supabase-auth-runtime-state="${auth.signedIn ? "signed-in" : "signed-out"}" data-supabase-auth-code="${h(auth.code || "")}" data-supabase-auth-login-stage="${h(auth.loginStage || "idle")}">
+    <section class="card" data-authoritative-sync-panel data-supabase-auth-runtime-state="${auth.signedIn ? "signed-in" : "signed-out"}" data-supabase-auth-code="${h(auth.code || "")}" data-supabase-auth-login-stage="${h(auth.loginStage || "idle")}" data-supabase-auth-callback-transport="${h(callbackTelemetry.transport || "none")}" data-supabase-auth-callback-parameters="${h(callbackParameterNames)}" data-supabase-auth-callback-stage="${h(callbackTelemetry.parseStage || "bridge")}" data-supabase-auth-callback-reject-reason="${h(callbackTelemetry.rejectReason || "NOT_PRESENT")}" data-supabase-auth-callback-has-query="${callbackBoolean("query")}" data-supabase-auth-callback-has-hash="${callbackBoolean("hash")}" data-supabase-auth-callback-has-code="${callbackBoolean("code")}" data-supabase-auth-callback-has-access-token="${callbackBoolean("access_token")}" data-supabase-auth-callback-has-refresh-token="${callbackBoolean("refresh_token")}" data-supabase-auth-callback-has-expires-in="${callbackBoolean("expires_in")}" data-supabase-auth-callback-has-expires-at="${callbackBoolean("expires_at")}" data-supabase-auth-callback-has-token-type="${callbackBoolean("token_type")}" data-supabase-auth-callback-has-type="${callbackBoolean("type")}" data-supabase-auth-callback-has-token-hash="${callbackBoolean("token_hash")}" data-supabase-auth-callback-has-error="${callbackBoolean("error")}" data-supabase-auth-callback-has-unknown="${callbackBoolean("unknown")}" data-supabase-auth-callback-has-duplicate="${callbackBoolean("duplicate")}">
       <div class="card-header"><h2>Supabase authoritative 同步</h2></div>
       <div class="card-body">
         <div class="hint ${auth.ownerVerified ? "green" : "amber"}" data-supabase-auth-status role="status" aria-live="polite">${h(auth.message)}</div>

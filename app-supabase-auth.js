@@ -7,7 +7,7 @@
   "use strict";
 
   const FORMAL_PUSH_CONFIRMATION = "啟用唯一正式推送";
-  const AUTH_RUNTIME_VERSION = "20260813-auth-login-diagnostic-001";
+  const AUTH_RUNTIME_VERSION = "20260813-recovery-callback-shape-telemetry-001";
   const SESSION_REFRESH_MARGIN_SECONDS = 60;
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const MAGIC_LINK_CALLBACK_ROOT_URL = "https://asd-642.github.io/lailai-materials-management/";
@@ -48,6 +48,39 @@
     "token_type",
     "type",
   ]));
+  const CALLBACK_TELEMETRY_PARAMETER_NAMES = Object.freeze([
+    "access_token",
+    "code",
+    "error",
+    "error_code",
+    "error_description",
+    "expires_at",
+    "expires_in",
+    "provider_refresh_token",
+    "provider_token",
+    "refresh_token",
+    "token",
+    "token_hash",
+    "token_type",
+    "type",
+    "unknown",
+  ]);
+  const CALLBACK_TELEMETRY_PRESENCE_NAMES = Object.freeze([
+    "query",
+    "hash",
+    ...CALLBACK_TELEMETRY_PARAMETER_NAMES,
+    "duplicate",
+  ]);
+  const CALLBACK_TELEMETRY_TRANSPORTS = Object.freeze(new Set(["query", "hash", "none"]));
+  const CALLBACK_TELEMETRY_STAGES = Object.freeze(new Set([
+    "bridge",
+    "callback-shape",
+    "pkce",
+    "project-identity",
+    "user-probe",
+    "session-storage",
+    "complete",
+  ]));
 
   function errorResult(code) {
     return Object.freeze({ ok: false, code: String(code || "SUPABASE_AUTH_REJECTED") });
@@ -59,6 +92,79 @@
 
   function hasOwn(value, key) {
     return Object.prototype.hasOwnProperty.call(value, key);
+  }
+
+  function emptyCallbackTelemetry() {
+    const presence = {};
+    for (const name of CALLBACK_TELEMETRY_PRESENCE_NAMES) presence[name] = false;
+    return Object.freeze({
+      transport: "none",
+      parameterNames: Object.freeze([]),
+      presence: Object.freeze(presence),
+      parseStage: "bridge",
+      rejectReason: "NOT_PRESENT",
+    });
+  }
+
+  function normalizeCallbackTelemetry(value) {
+    if (!isRecord(value)) return emptyCallbackTelemetry();
+    const transport = CALLBACK_TELEMETRY_TRANSPORTS.has(String(value.transport || ""))
+      ? String(value.transport)
+      : "none";
+    const allowedNames = new Set(CALLBACK_TELEMETRY_PARAMETER_NAMES);
+    const parameterNames = Array.isArray(value.parameterNames)
+      ? Array.from(new Set(value.parameterNames.filter((name) => allowedNames.has(String(name))).map(String))).sort()
+      : [];
+    const inputPresence = isRecord(value.presence) ? value.presence : {};
+    const presence = {};
+    for (const name of CALLBACK_TELEMETRY_PRESENCE_NAMES) {
+      presence[name] = inputPresence[name] === true;
+    }
+    for (const name of parameterNames) presence[name] = true;
+    return Object.freeze({
+      transport,
+      parameterNames: Object.freeze(parameterNames),
+      presence: Object.freeze(presence),
+      parseStage: "bridge",
+      rejectReason: "PENDING",
+    });
+  }
+
+  function callbackRejectReason(result) {
+    if (result?.ok === true) return "SUCCESS";
+    const code = String(result?.code || "");
+    const exact = {
+      SUPABASE_AUTH_CALLBACK_ENCODING_INVALID: "ENCODING_INVALID",
+      SUPABASE_AUTH_CALLBACK_FIELDS_INVALID: "FIELDS_INVALID",
+      SUPABASE_AUTH_CALLBACK_CONFLICT: "MIXED_TRANSPORT",
+      SUPABASE_AUTH_CALLBACK_MISSING: "FIELDS_MISSING",
+      SUPABASE_AUTH_CALLBACK_PAGE_IDENTITY_INVALID: "PAGE_IDENTITY_INVALID",
+      SUPABASE_AUTH_CALLBACK_SESSION_INVALID: "SESSION_INVALID",
+      SUPABASE_AUTH_CALLBACK_ALREADY_CONSUMED: "ALREADY_CONSUMED",
+      SUPABASE_AUTH_PKCE_CONTEXT_UNAVAILABLE: "PKCE_CONTEXT_UNAVAILABLE",
+      SUPABASE_AUTH_CALLBACK_PROJECT_IDENTITY_INVALID: "PROJECT_IDENTITY_INVALID",
+      SUPABASE_AUTH_CALLBACK_USER_INVALID: "USER_INVALID",
+      SUPABASE_AUTH_SESSION_STORAGE_FAILED: "STORAGE_FAILED",
+      SUPABASE_AUTH_NETWORK_ERROR: "NETWORK_REJECTED",
+      SUPABASE_AUTH_RESPONSE_IDENTITY_INVALID: "RESPONSE_IDENTITY_INVALID",
+    };
+    if (hasOwn(exact, code)) return exact[code];
+    if (code.startsWith("SUPABASE_AUTH_PKCE_HTTP_")) return "PKCE_HTTP_REJECTED";
+    return "REJECTED";
+  }
+
+  function finalizeCallbackTelemetry(telemetry, diagnostic, result) {
+    const normalized = normalizeCallbackTelemetry(telemetry);
+    const parseStage = CALLBACK_TELEMETRY_STAGES.has(String(diagnostic?.stage || ""))
+      ? String(diagnostic.stage)
+      : "callback-shape";
+    return Object.freeze({
+      transport: normalized.transport,
+      parameterNames: normalized.parameterNames,
+      presence: normalized.presence,
+      parseStage,
+      rejectReason: callbackRejectReason(result),
+    });
   }
 
   function createCallbackDiagnosticStore(storage) {
@@ -772,6 +878,7 @@
     let lastCode = publicConfig ? "SUPABASE_AUTH_SIGNED_OUT" : "SUPABASE_PUBLIC_CONFIG_REQUIRED";
     let loginStage = "idle";
     let callbackStage = "";
+    let callbackTelemetry = emptyCallbackTelemetry();
     let lastPushResult = null;
 
     function syncConfiguration(enabled = authorizationPhase === "authorized" || authorizationPhase === "in-flight") {
@@ -816,6 +923,7 @@
         code: String(lastCode || ""),
         loginStage,
         callbackStage,
+        callbackTelemetry,
         lastPushOk: lastPushResult?.ok === true,
       });
     }
@@ -836,6 +944,9 @@
 
     async function initialize(callbackSource = null) {
       const hadCallback = Boolean(callbackSource);
+      callbackTelemetry = hadCallback
+        ? normalizeCallbackTelemetry(callbackSource?.telemetry)
+        : emptyCallbackTelemetry();
       const restored = callbackSource
         ? await provider.establishMagicLinkSession(callbackSource)
         : await provider.restoreSession();
@@ -845,6 +956,7 @@
         const diagnostic = callbackDiagnostics.write(callbackDiagnosticForResult(callbackSource, restored));
         lastCode = diagnostic.code;
         callbackStage = diagnostic.stage;
+        callbackTelemetry = finalizeCallbackTelemetry(callbackTelemetry, diagnostic, restored);
       } else if (!restored.ok) {
         const previous = callbackDiagnostics.read();
         const diagnostic = previous || callbackDiagnostics.write(
@@ -865,6 +977,7 @@
     async function signInWithPassword(email, password) {
       callbackDiagnostics.clear();
       callbackStage = "";
+      callbackTelemetry = emptyCallbackTelemetry();
       authorizationPhase = "idle";
       ownerVerified = false;
       if (ownerBootstrapPhase !== "consumed") ownerBootstrapPhase = "idle";
