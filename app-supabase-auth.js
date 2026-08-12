@@ -7,7 +7,7 @@
   "use strict";
 
   const FORMAL_PUSH_CONFIRMATION = "å•Ÿç”¨å”¯ä¸€æ­£å¼æŽ¨é€";
-  const AUTH_RUNTIME_VERSION = "20260812-authenticated-owner-bootstrap-001";
+  const AUTH_RUNTIME_VERSION = "20260812-login-session-continuation-001";
   const SESSION_REFRESH_MARGIN_SECONDS = 60;
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const MAGIC_LINK_CALLBACK_ROOT_URL = "https://asd-642.github.io/lailai-materials-management/";
@@ -289,11 +289,19 @@
     }
   }
 
-  function normalizeSession(source) {
+  function normalizeSession(source, issuedAtSeconds = null) {
     if (!source || typeof source !== "object" || Array.isArray(source)) return null;
     const accessToken = String(source.access_token || "");
     const refreshToken = String(source.refresh_token || "");
-    const expiresAt = Number(source.expires_at);
+    const expiresIn = Number(source.expires_in);
+    const expiresAt = hasOwn(source, "expires_at")
+      ? Number(source.expires_at)
+      : (Number.isSafeInteger(issuedAtSeconds)
+        && Number.isSafeInteger(expiresIn)
+        && expiresIn > 0
+        && expiresIn <= 86400
+          ? issuedAtSeconds + expiresIn
+          : Number.NaN);
     const user = source.user && typeof source.user === "object" ? source.user : null;
     const userId = String(user?.id || "");
     if (accessToken.length < 32 || refreshToken.length < 20 || !Number.isFinite(expiresAt) || expiresAt <= 0 || !userId) {
@@ -303,7 +311,7 @@
       access_token: accessToken,
       refresh_token: refreshToken,
       expires_at: Math.floor(expiresAt),
-      expires_in: Number.isFinite(Number(source.expires_in)) ? Number(source.expires_in) : 0,
+      expires_in: Number.isFinite(expiresIn) ? expiresIn : 0,
       token_type: String(source.token_type || "bearer"),
       user: Object.freeze({
         id: userId,
@@ -337,735 +345,4 @@
     const request = typeof fetchImpl === "function"
       ? fetchImpl
       : (typeof root?.fetch === "function" ? root.fetch.bind(root) : null);
-    const sessionStorage = storage !== undefined ? storage : (root?.localStorage || null);
-    const nowMs = typeof now === "function" ? now : () => Date.now();
-    const sessionKey = projectRef ? `sb-${projectRef}-auth-token` : "";
-    const pkceVerifierKey = sessionKey ? `${sessionKey}-code-verifier` : "";
-    const listeners = new Set();
-    let currentSession = null;
-    let refreshing = null;
-    let callbackConsumed = false;
-    let lastSessionReadStatus = "missing";
-
-    function emit(event) {
-      const snapshot = safeSession(currentSession);
-      for (const listener of listeners) {
-        try {
-          listener(String(event), snapshot);
-        } catch (error) {
-          // Subscriber failures must not change Auth or sync state.
-        }
-      }
-    }
-
-    function readStoredSession() {
-      if (!sessionStorage || !sessionKey) {
-        lastSessionReadStatus = "unavailable";
-        return null;
-      }
-      try {
-        const raw = sessionStorage.getItem(sessionKey);
-        if (!raw) {
-          lastSessionReadStatus = "missing";
-          return null;
-        }
-        const value = normalizeSession(JSON.parse(raw));
-        lastSessionReadStatus = value ? "ok" : "invalid";
-        return value;
-      } catch (error) {
-        lastSessionReadStatus = "failed";
-        return null;
-      }
-    }
-
-    function writeStoredSession(sessionValue) {
-      if (!sessionStorage || !sessionKey) return false;
-      try {
-        sessionStorage.setItem(sessionKey, JSON.stringify(sessionValue));
-        return true;
-      } catch (error) {
-        return false;
-      }
-    }
-
-    function clearStoredSession() {
-      currentSession = null;
-      if (!sessionStorage || !sessionKey) return;
-      try {
-        sessionStorage.removeItem(sessionKey);
-      } catch (error) {
-        // Storage denial already leaves the provider signed out in memory.
-      }
-    }
-
-    function sessionIsFresh(sessionValue) {
-      const nowSeconds = Math.floor(Number(nowMs()) / 1000);
-      return Boolean(sessionValue && sessionValue.expires_at > nowSeconds + SESSION_REFRESH_MARGIN_SECONDS);
-    }
-
-    function status() {
-      const snapshot = safeSession(currentSession);
-      return Object.freeze({
-        configured: Boolean(projectUrl && publishableKey && projectRef && organizationId && request && sessionStorage),
-        signedIn: Boolean(snapshot),
-        user: snapshot?.user || null,
-        expiresAt: snapshot?.expiresAt || null,
-        sessionStorageKey: sessionKey,
-      });
-    }
-
-    async function post(path, body, accessToken) {
-      if (!request || !projectUrl || !publishableKey) return errorResult("SUPABASE_AUTH_CONFIGURATION_INVALID");
-      const headers = {
-        apikey: publishableKey,
-        "Content-Type": "application/json",
-      };
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-      try {
-        const response = await request(`${projectUrl}${path}`, {
-          method: "POST",
-          headers,
-          body: body === undefined ? undefined : JSON.stringify(body),
-          cache: "no-store",
-          credentials: "omit",
-          redirect: "error",
-          referrerPolicy: "no-referrer",
-        });
-        const value = await responseJson(response);
-        return { ok: response.ok === true, status: Number(response.status), value };
-      } catch (error) {
-        return errorResult("SUPABASE_AUTH_NETWORK_ERROR");
-      }
-    }
-
-    async function exactAuthRequest(path, { method, body, accessToken } = {}) {
-      if (!request || !projectUrl || !publishableKey) return errorResult("SUPABASE_AUTH_CONFIGURATION_INVALID");
-      const url = `${projectUrl}${path}`;
-      const headers = { apikey: publishableKey };
-      if (body !== undefined) headers["Content-Type"] = "application/json";
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-      let response;
-      try {
-        response = await request(url, {
-          method: String(method || "GET"),
-          headers,
-          body: body === undefined ? undefined : JSON.stringify(body),
-          cache: "no-store",
-          credentials: "omit",
-          redirect: "error",
-          referrerPolicy: "no-referrer",
-        });
-      } catch (error) {
-        return errorResult("SUPABASE_AUTH_NETWORK_ERROR");
-      }
-      if (!response || response.redirected !== false || response.url !== url) {
-        return errorResult("SUPABASE_AUTH_RESPONSE_IDENTITY_INVALID");
-      }
-      const value = await responseJson(response);
-      return Object.freeze({ ok: response.ok === true, status: Number(response.status), value });
-    }
-
-    async function setSession(source) {
-      if (!isRecord(source)) return errorResult("SUPABASE_AUTH_CALLBACK_SESSION_INVALID");
-      const accessToken = String(source.access_token || "");
-      const refreshToken = String(source.refresh_token || "");
-      const nowSeconds = Math.floor(Number(nowMs()) / 1000);
-      const claims = validateMagicLinkAccessToken(accessToken, config, nowSeconds);
-      if (!claims
-        || refreshToken.length < 20
-        || refreshToken.length > TOKEN_MAX_LENGTH) {
-        return errorResult("SUPABASE_AUTH_CALLBACK_PROJECT_IDENTITY_INVALID");
-      }
-
-      const verified = await exactAuthRequest("/auth/v1/user", { method: "GET", accessToken });
-      const user = verified.ok && isRecord(verified.value) ? verified.value : null;
-      if (!user || String(user.id || "") !== String(claims.sub)) {
-        return errorResult(verified.code || "SUPABASE_AUTH_CALLBACK_USER_INVALID");
-      }
-      const sessionValue = normalizeSession({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        expires_at: Number(claims.exp),
-        expires_in: Math.max(0, Number(claims.exp) - nowSeconds),
-        token_type: "bearer",
-        user: {
-          id: String(user.id),
-          email: String(user.email || ""),
-        },
-      });
-      if (!sessionValue || !writeStoredSession(sessionValue)) {
-        return errorResult("SUPABASE_AUTH_SESSION_STORAGE_FAILED");
-      }
-      currentSession = sessionValue;
-      emit("SIGNED_IN");
-      return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
-    }
-
-    function consumePkceVerifier() {
-      if (!sessionStorage || !pkceVerifierKey) return null;
-      let stored = "";
-      try {
-        stored = String(sessionStorage.getItem(pkceVerifierKey) || "");
-        sessionStorage.removeItem(pkceVerifierKey);
-      } catch (error) {
-        return null;
-      }
-      const parts = stored.split("/");
-      if (parts.length > 2
-        || !PKCE_VERIFIER_PATTERN.test(parts[0] || "")
-        || (parts.length === 2 && parts[1] !== "MAGIC_LINK")) {
-        return null;
-      }
-      return parts[0];
-    }
-
-    async function exchangeCodeForSession(authCode) {
-      const code = String(authCode || "");
-      if (!AUTH_CODE_PATTERN.test(code)) return errorResult("SUPABASE_AUTH_CALLBACK_FIELDS_INVALID");
-      const codeVerifier = consumePkceVerifier();
-      if (!codeVerifier) return errorResult("SUPABASE_AUTH_PKCE_CONTEXT_UNAVAILABLE");
-      const exchanged = await exactAuthRequest("/auth/v1/token?grant_type=pkce", {
-        method: "POST",
-        body: { auth_code: code, code_verifier: codeVerifier },
-      });
-      if (!exchanged.ok || !isRecord(exchanged.value)) {
-        return errorResult(exchanged.code || `SUPABASE_AUTH_PKCE_HTTP_${exchanged.status || 0}`);
-      }
-      const nowSeconds = Math.floor(Number(nowMs()) / 1000);
-      const claims = validateMagicLinkAccessToken(exchanged.value.access_token, config, nowSeconds);
-      const sessionValue = normalizeSession({
-        ...exchanged.value,
-        expires_at: Number(exchanged.value.expires_at || claims?.exp),
-      });
-      if (!claims) return errorResult("SUPABASE_AUTH_CALLBACK_PROJECT_IDENTITY_INVALID");
-      if (!sessionValue || sessionValue.user.id !== String(claims.sub)) {
-        return errorResult("SUPABASE_AUTH_CALLBACK_USER_INVALID");
-      }
-      if (!writeStoredSession(sessionValue)) return errorResult("SUPABASE_AUTH_SESSION_STORAGE_FAILED");
-      currentSession = sessionValue;
-      emit("SIGNED_IN");
-      return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
-    }
-
-    async function establishMagicLinkSession(callbackSource) {
-      if (callbackConsumed) return errorResult("SUPABASE_AUTH_CALLBACK_ALREADY_CONSUMED");
-      callbackConsumed = true;
-      const parsed = parseMagicLinkCallback(callbackSource);
-      if (!parsed.ok) return Object.freeze({ ...parsed, callbackStage: "callback-shape" });
-      const result = parsed.mode === "implicit"
-        ? await setSession({ access_token: parsed.accessToken, refresh_token: parsed.refreshToken })
-        : await exchangeCodeForSession(parsed.authCode);
-      if (!result.ok) {
-        const code = String(result.code || "");
-        let callbackStage = parsed.mode === "pkce" ? "pkce" : "user-probe";
-        if (code === "SUPABASE_AUTH_CALLBACK_PROJECT_IDENTITY_INVALID") callbackStage = "project-identity";
-        else if (code === "SUPABASE_AUTH_SESSION_STORAGE_FAILED") callbackStage = "session-storage";
-        return Object.freeze({ ...result, callbackStage });
-      }
-      return Object.freeze({ ok: true, code: "", callback: parsed.mode, session: result.session });
-    }
-
-    async function refreshSession() {
-      if (refreshing) return refreshing;
-      const source = currentSession || readStoredSession();
-      if (!source?.refresh_token) {
-        clearStoredSession();
-        emit("SIGNED_OUT");
-        return errorResult("SUPABASE_AUTH_SESSION_EXPIRED");
-      }
-      refreshing = (async () => {
-        const response = await post("/auth/v1/token?grant_type=refresh_token", {
-          refresh_token: source.refresh_token,
-        });
-        const renewed = response.ok ? normalizeSession(response.value) : null;
-        if (!renewed || !writeStoredSession(renewed)) {
-          clearStoredSession();
-          emit("SIGNED_OUT");
-          return errorResult("SUPABASE_AUTH_SESSION_EXPIRED");
-        }
-        currentSession = renewed;
-        emit("TOKEN_REFRESHED");
-        return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
-      })();
-      try {
-        return await refreshing;
-      } finally {
-        refreshing = null;
-      }
-    }
-
-    async function restoreSession() {
-      const stored = readStoredSession();
-      if (!stored) {
-        clearStoredSession();
-        emit("INITIAL_SESSION");
-        return errorResult(["invalid", "failed", "unavailable"].includes(lastSessionReadStatus)
-          ? "SUPABASE_AUTH_SESSION_STORAGE_FAILED"
-          : "SUPABASE_AUTH_SIGNED_OUT");
-      }
-      currentSession = stored;
-      if (!sessionIsFresh(currentSession)) return refreshSession();
-      emit("INITIAL_SESSION");
-      return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
-    }
-
-    async function signInWithPassword(email, password) {
-      const normalizedEmail = String(email || "").trim().toLowerCase();
-      const suppliedPassword = String(password || "");
-      if (!EMAIL_PATTERN.test(normalizedEmail) || suppliedPassword.length < 8) {
-        return errorResult("SUPABASE_AUTH_CREDENTIAL_INPUT_INVALID");
-      }
-      const response = await post("/auth/v1/token?grant_type=password", {
-        email: normalizedEmail,
-        password: suppliedPassword,
-      });
-      const signedInSession = response.ok ? normalizeSession(response.value) : null;
-      if (!signedInSession) {
-        clearStoredSession();
-        emit("SIGNED_OUT");
-        return errorResult(response.code || `SUPABASE_AUTH_HTTP_${response.status || 0}`);
-      }
-      if (!writeStoredSession(signedInSession)) {
-        clearStoredSession();
-        emit("SIGNED_OUT");
-        return errorResult("SUPABASE_AUTH_SESSION_STORAGE_FAILED");
-      }
-      currentSession = signedInSession;
-      emit("SIGNED_IN");
-      return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
-    }
-
-    async function getAccessToken() {
-      if (!currentSession) currentSession = readStoredSession();
-      if (!currentSession) return "";
-      if (!sessionIsFresh(currentSession)) {
-        const refreshed = await refreshSession();
-        if (!refreshed.ok) return "";
-      }
-      return String(currentSession?.access_token || "");
-    }
-
-    async function verifyOwnerMembership() {
-      const accessToken = await getAccessToken();
-      if (!accessToken) return errorResult("SUPABASE_AUTH_SIGNED_OUT");
-      const response = await post("/rest/v1/rpc/get_my_app_context", {
-        p_organization_id: organizationId,
-      }, accessToken);
-      if (!response.ok) {
-        if (response.status === 401) return errorResult("SUPABASE_AUTH_TOKEN_EXPIRED");
-        if (response.status === 403) return errorResult("SUPABASE_AUTH_OWNER_REQUIRED");
-        return errorResult(response.code || `SUPABASE_AUTH_OWNER_GATE_HTTP_${response.status || 0}`);
-      }
-      const value = response.value && typeof response.value === "object" ? response.value : null;
-      if (!value || value.ok !== true) return errorResult("SUPABASE_AUTH_MEMBERSHIP_INVALID");
-      if (String(value.organization_id || "").toLowerCase() !== organizationId) {
-        return errorResult("SUPABASE_AUTH_ORGANIZATION_MISMATCH");
-      }
-      if (String(value.role || "") !== "owner") return errorResult("SUPABASE_AUTH_OWNER_REQUIRED");
-      return Object.freeze({ ok: true, code: "", role: "owner", organizationId });
-    }
-
-    async function bootstrapFirstOwner() {
-      const accessToken = await getAccessToken();
-      if (!accessToken) return errorResult("SUPABASE_AUTH_SIGNED_OUT");
-      const response = await post("/rest/v1/rpc/bootstrap_authenticated_first_owner_v1", {}, accessToken);
-      if (!response.ok) {
-        if (response.status === 401) return errorResult("SUPABASE_AUTH_TOKEN_EXPIRED");
-        if (response.status === 403) return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_DENIED");
-        return errorResult(`SUPABASE_AUTH_OWNER_BOOTSTRAP_HTTP_${response.status || 0}`);
-      }
-      const value = response.value && typeof response.value === "object" ? response.value : null;
-      if (!value || value.ok !== true) {
-        const code = String(value?.code || "");
-        if (code === "BOOTSTRAP_CLOSED") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_CLOSED");
-        if (code === "AUTH_REQUIRED") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_AUTH_REQUIRED");
-        if (code === "AUTH_EMAIL_REQUIRED") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_EMAIL_REQUIRED");
-        if (code === "ORGANIZATION_NOT_FOUND") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_ORGANIZATION_NOT_FOUND");
-        return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_RESULT_INVALID");
-      }
-      if (String(value.organization_id || "").toLowerCase() !== organizationId
-        || String(value.role || "") !== "owner") {
-        return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_RESULT_INVALID");
-      }
-      return Object.freeze({ ok: true, code: "", role: "owner", organizationId });
-    }
-
-    async function signOut() {
-      if (!currentSession) currentSession = readStoredSession();
-      const accessToken = currentSession?.access_token || "";
-      let remoteOk = true;
-      if (accessToken) {
-        const response = await post("/auth/v1/logout?scope=local", undefined, accessToken);
-        remoteOk = response.ok === true || response.status === 401;
-      }
-      clearStoredSession();
-      emit("SIGNED_OUT");
-      return remoteOk
-        ? Object.freeze({ ok: true, code: "" })
-        : errorResult("SUPABASE_AUTH_LOGOUT_REMOTE_FAILED");
-    }
-
-    function onAuthStateChange(callback) {
-      if (typeof callback !== "function") return Object.freeze({ unsubscribe() {} });
-      listeners.add(callback);
-      return Object.freeze({ unsubscribe: () => listeners.delete(callback) });
-    }
-
-    return Object.freeze({
-      signInWithPassword,
-      setSession,
-      exchangeCodeForSession,
-      establishMagicLinkSession,
-      signOut,
-      restoreSession,
-      refreshSession,
-      getAccessToken,
-      verifyOwnerMembership,
-      bootstrapFirstOwner,
-      onAuthStateChange,
-      status,
-      sessionStorageKey: sessionKey,
-    });
-  }
-
-  function createUnavailableProvider(code) {
-    const unavailable = () => Promise.resolve(errorResult(code));
-    return Object.freeze({
-      signInWithPassword: unavailable,
-      setSession: unavailable,
-      exchangeCodeForSession: unavailable,
-      establishMagicLinkSession: unavailable,
-      signOut: unavailable,
-      restoreSession: unavailable,
-      refreshSession: unavailable,
-      getAccessToken: async () => "",
-      verifyOwnerMembership: unavailable,
-      bootstrapFirstOwner: unavailable,
-      onAuthStateChange: () => Object.freeze({ unsubscribe() {} }),
-      status: () => Object.freeze({ configured: false, signedIn: false, user: null, expiresAt: null, sessionStorageKey: "" }),
-      sessionStorageKey: "",
-    });
-  }
-
-  function createRuntimeAuthIntegration({ config, authProvider, configApi, fetchImpl, eventTarget, callbackDiagnosticStorage } = {}) {
-    const provider = authProvider || createUnavailableProvider("SUPABASE_PUBLIC_CONFIG_REQUIRED");
-    const publicConfig = config && typeof config === "object" ? config : null;
-    const target = eventTarget || null;
-    const callbackDiagnostics = createCallbackDiagnosticStore(callbackDiagnosticStorage);
-    let ownerVerified = false;
-    let authorizationPhase = "idle";
-    let ownerBootstrapPhase = "idle";
-    let lastCode = publicConfig ? "SUPABASE_AUTH_SIGNED_OUT" : "SUPABASE_PUBLIC_CONFIG_REQUIRED";
-    let callbackStage = "";
-    let lastPushResult = null;
-
-    function syncConfiguration(enabled = authorizationPhase === "authorized" || authorizationPhase === "in-flight") {
-      if (!publicConfig) {
-        return Object.freeze({ enabled: false, mode: "local-only", code: "SUPABASE_PUBLIC_CONFIG_REQUIRED", expectedPreviousRevision: 0 });
-      }
-      return Object.freeze({
-        enabled: enabled === true,
-        mode: enabled === true ? "push-only" : "local-only",
-        code: enabled === true ? "" : lastCode || "SUPABASE_FORMAL_PUSH_NOT_AUTHORIZED",
-        url: String(publicConfig.projectUrl || ""),
-        anonKey: String(publicConfig.publishableKey || ""),
-        organizationId: String(publicConfig.organizationId || ""),
-        organizationSlug: String(publicConfig.organizationSlug || ""),
-        expectedPreviousRevision: Number(publicConfig.expectedPreviousRevision),
-        getAccessToken: provider.getAccessToken,
-        fetchImpl: typeof fetchImpl === "function" ? fetchImpl : undefined,
-      });
-    }
-
-    function publicStatus() {
-      const auth = provider.status();
-      const canBootstrapFirstOwner = Boolean(
-        publicConfig
-        && auth.signedIn
-        && !ownerVerified
-        && ownerBootstrapPhase === "idle"
-        && lastCode === "SUPABASE_AUTH_MEMBERSHIP_INVALID"
-      );
-      return Object.freeze({
-        configured: Boolean(publicConfig && auth.configured),
-        configCode: publicConfig ? "" : "SUPABASE_PUBLIC_CONFIG_REQUIRED",
-        signedIn: auth.signedIn === true,
-        user: auth.user || null,
-        ownerVerified,
-        formalAuthorized: authorizationPhase === "authorized",
-        phase: authorizationPhase,
-        canAuthorize: Boolean(publicConfig && auth.signedIn && ownerVerified && authorizationPhase === "idle"),
-        canPush: Boolean(publicConfig && auth.signedIn && ownerVerified && authorizationPhase === "authorized"),
-        canBootstrapFirstOwner,
-        ownerBootstrapPhase,
-        code: String(lastCode || ""),
-        callbackStage,
-        lastPushOk: lastPushResult?.ok === true,
-      });
-    }
-
-    function publish() {
-      const facade = syncConfiguration();
-      if (configApi && typeof configApi.publishSyncFacade === "function") configApi.publishSyncFacade(facade);
-      const status = publicStatus();
-      if (target && typeof target.dispatchEvent === "function" && typeof root?.CustomEvent === "function") {
-        try {
-          target.dispatchEvent(new root.CustomEvent("materials-quote-supabase-auth-change", { detail: status }));
-        } catch (error) {
-          // A UI notification failure must not alter authorization.
-        }
-      }
-      return status;
-    }
-
-    async function initialize(callbackSource = null) {
-      const hadCallback = Boolean(callbackSource);
-      const restored = callbackSource
-        ? await provider.establishMagicLinkSession(callbackSource)
-        : await provider.restoreSession();
-      ownerVerified = false;
-      authorizationPhase = "idle";
-      if (hadCallback) {
-        const diagnostic = callbackDiagnostics.write(callbackDiagnosticForResult(callbackSource, restored));
-        lastCode = diagnostic.code;
-        callbackStage = diagnostic.stage;
-      } else if (!restored.ok) {
-        const previous = callbackDiagnostics.read();
-        const diagnostic = previous || callbackDiagnostics.write(
-          restored.code === "SUPABASE_AUTH_SESSION_STORAGE_FAILED"
-            ? CALLBACK_DIAGNOSTIC_STATUSES.storage
-            : CALLBACK_DIAGNOSTIC_STATUSES.noCallback,
-        );
-        lastCode = diagnostic.code;
-        callbackStage = diagnostic.stage;
-      } else {
-        lastCode = "SUPABASE_AUTH_OWNER_GATE_REQUIRED";
-        callbackStage = "";
-      }
-      publish();
-      return restored;
-    }
-
-    async function signInWithPassword(email, password) {
-      callbackDiagnostics.clear();
-      callbackStage = "";
-      authorizationPhase = "idle";
-      ownerVerified = false;
-      if (ownerBootstrapPhase !== "consumed") ownerBootstrapPhase = "idle";
-      lastPushResult = null;
-      const signedIn = await provider.signInWithPassword(email, password);
-      if (!signedIn.ok) {
-        lastCode = signedIn.code;
-        publish();
-        return signedIn;
-      }
-      const gate = await verifyOwnerMembership();
-      return gate.ok ? signedIn : gate;
-    }
-
-    async function signOut() {
-      callbackDiagnostics.clear();
-      callbackStage = "";
-      lastCode = "SUPABASE_AUTH_SIGNED_OUT";
-      authorizationPhase = "idle";
-      ownerVerified = false;
-      lastPushResult = null;
-      const result = await provider.signOut();
-      lastCode = result.ok ? "SUPABASE_AUTH_SIGNED_OUT" : result.code;
-      publish();
-      return result;
-    }
-
-    async function verifyOwnerMembership() {
-      if (!publicConfig) {
-        lastCode = "SUPABASE_PUBLIC_CONFIG_REQUIRED";
-        ownerVerified = false;
-        publish();
-        return errorResult(lastCode);
-      }
-      const gate = await provider.verifyOwnerMembership();
-      ownerVerified = gate.ok === true;
-      lastCode = gate.ok ? "SUPABASE_FORMAL_PUSH_CONFIRMATION_REQUIRED" : gate.code;
-      if (!gate.ok) authorizationPhase = authorizationPhase === "consumed" ? "consumed" : "idle";
-      publish();
-      return gate;
-    }
-
-    async function bootstrapFirstOwner() {
-      const auth = provider.status();
-      if (!publicConfig) return errorResult("SUPABASE_PUBLIC_CONFIG_REQUIRED");
-      if (!auth.signedIn) return errorResult("SUPABASE_AUTH_SIGNED_OUT");
-      if (ownerBootstrapPhase === "in-flight") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_IN_FLIGHT");
-      if (ownerBootstrapPhase === "consumed") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_ALREADY_CONSUMED");
-      if (ownerVerified || lastCode !== "SUPABASE_AUTH_MEMBERSHIP_INVALID") {
-        return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_NOT_AVAILABLE");
-      }
-      ownerBootstrapPhase = "in-flight";
-      lastCode = "SUPABASE_AUTH_OWNER_BOOTSTRAP_IN_FLIGHT";
-      publish();
-      const created = await provider.bootstrapFirstOwner();
-      ownerBootstrapPhase = "consumed";
-      if (!created.ok) {
-        ownerVerified = false;
-        lastCode = created.code;
-        publish();
-        return created;
-      }
-      const gate = await provider.verifyOwnerMembership();
-      ownerVerified = gate.ok === true;
-      lastCode = gate.ok
-        ? "SUPABASE_FORMAL_PUSH_CONFIRMATION_REQUIRED"
-        : "SUPABASE_AUTH_OWNER_BOOTSTRAP_POSTCHECK_FAILED";
-      publish();
-      return gate.ok
-        ? Object.freeze({ ok: true, code: "", role: "owner", organizationId: String(publicConfig.organizationId || "") })
-        : errorResult(lastCode);
-    }
-
-    async function authorizeFormalPushOnce({ confirmation, artifactGatesAccepted } = {}) {
-      if (authorizationPhase === "in-flight") return errorResult("SUPABASE_FORMAL_PUSH_IN_FLIGHT");
-      if (authorizationPhase === "consumed") return errorResult("SUPABASE_FORMAL_PUSH_ALREADY_CONSUMED");
-      if (!publicConfig) return errorResult("SUPABASE_PUBLIC_CONFIG_REQUIRED");
-      if (confirmation !== FORMAL_PUSH_CONFIRMATION || artifactGatesAccepted !== true) {
-        lastCode = "SUPABASE_FORMAL_PUSH_CONFIRMATION_REQUIRED";
-        publish();
-        return errorResult(lastCode);
-      }
-      const gate = await verifyOwnerMembership();
-      if (!gate.ok) return gate;
-      authorizationPhase = "authorized";
-      lastCode = "";
-      lastPushResult = null;
-      publish();
-      return Object.freeze({ ok: true, code: "" });
-    }
-
-    async function executeFormalPush(push) {
-      if (authorizationPhase === "in-flight") return errorResult("SUPABASE_FORMAL_PUSH_IN_FLIGHT");
-      if (authorizationPhase === "consumed") return errorResult("SUPABASE_FORMAL_PUSH_ALREADY_CONSUMED");
-      if (authorizationPhase !== "authorized" || typeof push !== "function") {
-        return errorResult("SUPABASE_FORMAL_PUSH_NOT_AUTHORIZED");
-      }
-      authorizationPhase = "in-flight";
-      lastCode = "";
-      publish();
-      const gate = await provider.verifyOwnerMembership();
-      ownerVerified = gate.ok === true;
-      if (!gate.ok) {
-        authorizationPhase = "consumed";
-        lastCode = gate.code;
-        lastPushResult = gate;
-        publish();
-        return gate;
-      }
-      let result;
-      try {
-        result = await push();
-      } catch (error) {
-        result = errorResult("SUPABASE_FORMAL_PUSH_FAILED");
-      }
-      if (!result || typeof result !== "object") result = errorResult("SUPABASE_FORMAL_PUSH_RESULT_INVALID");
-      authorizationPhase = "consumed";
-      lastCode = result.ok ? "" : String(result.code || "SUPABASE_FORMAL_PUSH_FAILED");
-      lastPushResult = result;
-      publish();
-      return result;
-    }
-
-    provider.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT") {
-        ownerVerified = false;
-        if (authorizationPhase !== "consumed") authorizationPhase = "idle";
-        const diagnostic = CALLBACK_DIAGNOSTIC_BY_CODE.get(lastCode);
-        if (!diagnostic || diagnostic === CALLBACK_DIAGNOSTIC_STATUSES.success) {
-          lastCode = "SUPABASE_AUTH_SIGNED_OUT";
-          callbackStage = "";
-        }
-      }
-      publish();
-    });
-
-    publish();
-
-    return Object.freeze({
-      initialize,
-      signInWithPassword,
-      signOut,
-      verifyOwnerMembership,
-      bootstrapFirstOwner,
-      authorizeFormalPushOnce,
-      executeFormalPush,
-      getSyncConfiguration: syncConfiguration,
-      status: publicStatus,
-      authProvider: provider,
-    });
-  }
-
-  function bootstrapBrowserRuntime(browserRoot = root) {
-    if (!browserRoot || browserRoot.MaterialsQuoteSupabaseRuntime) return browserRoot?.MaterialsQuoteSupabaseRuntime || null;
-    const configApi = browserRoot.MaterialsQuoteSupabaseRuntimeConfig;
-    const config = configApi?.getCurrentConfiguration?.() || null;
-    const fetchImpl = typeof browserRoot.fetch === "function" ? browserRoot.fetch.bind(browserRoot) : null;
-    let browserStorage = null;
-    let callbackDiagnosticStorage = null;
-    try {
-      browserStorage = browserRoot.localStorage;
-    } catch (error) {
-      browserStorage = null;
-    }
-    try {
-      callbackDiagnosticStorage = browserRoot.sessionStorage;
-    } catch (error) {
-      callbackDiagnosticStorage = null;
-    }
-    const provider = config
-      ? createSupabaseAuthProvider({ config, fetchImpl, storage: browserStorage })
-      : createUnavailableProvider(configApi?.status?.().code || "SUPABASE_PUBLIC_CONFIG_REQUIRED");
-    const integration = createRuntimeAuthIntegration({
-      config,
-      authProvider: provider,
-      configApi,
-      fetchImpl,
-      eventTarget: browserRoot,
-      callbackDiagnosticStorage,
-    });
-    browserRoot.MaterialsQuoteSupabaseRuntime = integration;
-    browserRoot.MaterialsQuoteSupabaseSyncConfig = integration.getSyncConfiguration();
-    let callbackSource = browserRoot.MaterialsQuoteSupabaseAuthCallback || null;
-    try {
-      delete browserRoot.MaterialsQuoteSupabaseAuthCallback;
-    } catch (error) {
-      try {
-        browserRoot.MaterialsQuoteSupabaseAuthCallback = null;
-      } catch (ignored) {
-        // The provider still enforces a single callback consumption.
-      }
-    }
-    Promise.resolve(integration.initialize(callbackSource)).then((result) => {
-      callbackSource = null;
-      if (result?.ok === true && result.callback && browserRoot.location) {
-        browserRoot.location.hash = "#/settings/company";
-      }
-    });
-    if (config && typeof browserRoot.addEventListener === "function") {
-      browserRoot.addEventListener("storage", (event) => {
-        if (event?.key === provider.sessionStorageKey) integration.initialize();
-      });
-    }
-    return integration;
-  }
-
-  return Object.freeze({
-    FORMAL_PUSH_CONFIRMATION,
-    AUTH_RUNTIME_VERSION,
-    MAGIC_LINK_CALLBACK_URL,
-    MAGIC_LINK_CALLBACK_URLS,
-    CALLBACK_DIAGNOSTIC_STORAGE_KEY,
-    CALLBACK_DIAGNOSTIC_STATUSES,
-    parseMagicLinkCallback,
-    validateMagicLinkAccessToken,
-    createSupabaseAuthProvider,
-    createRuntimeAuthIntegration,
-    bootstrapBrowserRuntime,
-  });
-});
+    const sessionStorage = çM5¶‰žËkºwµç]•É…Í” ¤€„ôô½É…¹¥é…Ñ¥½¹%(€€€€€€€ñðMÑÉ¥¹œ¡Ù…±Õ”¹É½±”ñð€ˆˆ¤€„ôô€‰½Ý¹•Èˆ¤ì(€€€€€€€É•ÑÕÉ¸•ÉÉ½ÉI•ÍÕ±Ð ‰MUA	M}UQ!}=]9I}	==QMQIA}IMU1Q}%9Y1%ˆ¤ì(€€€€€ô(€€€€€É•ÑÕÉ¸=‰©•Ð¹™É••é”¡ì½¬èÑÉÕ”°½‘”è€ˆˆ°É½±”è€‰½Ý¹•Èˆ°½É…¹¥é…Ñ¥½¹%ô¤ì(€€€ô((€€€…Íå¹Œ™Õ¹Ñ¥½¸Í¥¹=ÕÐ ¤ì(€€€€€¥˜€ …ÕÉÉ•¹ÑM•ÍÍ¥½¸¤ÕÉÉ•¹ÑM•ÍÍ¥½¸€ôÉ•…‘MÑ½É•‘M•ÍÍ¥½¸ ¤ì(€€€€€½¹ÍÐ…•ÍÍQ½­•¸€ôÕÉÉ•¹ÑM•ÍÍ¥½¸ü¹…•ÍÍ}Ñ½­•¸ñð€ˆˆì(€€€€€±•ÐÉ•µ½Ñ•=¬€ôÑÉÕ”ì(€€€€€¥˜€¡…•ÍÍQ½­•¸¤ì(€€€€€€€½¹ÍÐÉ•ÍÁ½¹Í”€ô…Ý…¥ÐÁ½ÍÐ ˆ½…ÕÑ ½ØÄ½±½½ÕÐýÍ½Á”õ±½…°ˆ°Õ¹‘•™¥¹•°…•ÍÍQ½­•¸¤ì(€€€€€€€É•µ½Ñ•=¬€ôÉ•ÍÁ½¹Í”¹½¬€ôôôÑÉÕ”ñðÉ•ÍÁ½¹Í”¹ÍÑ…ÑÕÌ€ôôô€ÐÀÄì(€€€€€ô(€€€€€±•…ÉMÑ½É•‘M•ÍÍ¥½¸ ¤ì(€€€€€•µ¥Ð ‰M%9}=UPˆ¤ì(€€€€€É•ÑÕÉ¸É•µ½Ñ•=¬(€€€€€€€€ü=‰©•Ð¹™É••é”¡ì½¬èÑÉÕ”°½‘”è€ˆˆô¤(€€€€€€€€è•ÉÉ½ÉI•ÍÕ±Ð ‰MUA	M}UQ!}1==UQ}I5=Q}%1ˆ¤ì(€€€ô((€€€™Õ¹Ñ¥½¸½¹ÕÑ¡MÑ…Ñ•¡…¹”¡…±±‰…¬¤ì(€€€€€¥˜€¡ÑåÁ•½˜…±±‰…¬€„ôô€‰™Õ¹Ñ¥½¸ˆ¤É•ÑÕÉ¸=‰©•Ð¹™É••é”¡ìÕ¹ÍÕ‰ÍÉ¥‰” ¤íôô¤ì(€€€€€±¥ÍÑ•¹•ÉÌ¹…‘¡…±±‰…¬¤ì(€€€€€É•ÑÕÉ¸=‰©•Ð¹™É••é”¡ìÕ¹ÍÕ‰ÍÉ¥‰”è€ ¤€ôø±¥ÍÑ•¹•ÉÌ¹‘•±•Ñ”¡…±±‰…¬¤ô¤ì(€€€ô((€€€É•ÑÕÉ¸=‰©•Ð¹™É••é”¡ì(€€€€€Í¥¹%¹]¥Ñ¡A…ÍÍÝ½É°(€€€€€Í•ÑM•ÍÍ¥½¸°(€€€€€•á¡…¹•½‘•½ÉM•ÍÍ¥½¸°(€€€€€•ÍÑ…‰±¥Í¡5…¥1¥¹­M•ÍÍ¥½¸°(€€€€€Í¥¹=ÕÐ°(€€€€€É•ÍÑ½É•M•ÍÍ¥½¸°(€€€€€É•™É•Í¡M•ÍÍ¥½¸°(€€€€€•Ñ•ÍÍQ½­•¸°(€€€€€Ù•É¥™å=Ý¹•É5•µ‰•ÉÍ¡¥À°(€€€€€‰½½ÑÍÑÉ…Á¥ÉÍÑ=Ý¹•È°(€€€€€½¹ÕÑ¡MÑ…Ñ•¡…¹”°(€€€€€ÍÑ…ÑÕÌ°(€€€€€Í•ÍÍ¥½¹MÑ½É…•-•äèÍ•ÍÍ¥½¹-•ä°(€€€ô¤ì(€ô((€™Õ¹Ñ¥½¸É•…Ñ•U¹…Ù…¥±…‰±•AÉ½Ù¥‘•È¡½‘”¤ì(€€€½¹ÍÐÕ¹…Ù…¥±…‰±”€ô€ ¤€ôøAÉ½µ¥Í”¹É•Í½±Ù”¡•ÉÉ½ÉI•ÍÕ±Ð¡½‘”¤¤ì(€€€É•ÑÕÉ¸=‰©•Ð¹™É••é”¡ì(€€€€€Í¥¹%¹]¥Ñ¡A…ÍÍÝ½ÉèÕ¹…Ù…¥±…‰±”°(€€€€€Í•ÑM•ÍÍ¥½¸èÕ¹…Ù…¥±…‰±”°(€€€€€•á¡…¹•½‘•½ÉM•ÍÍ¥½¸èÕ¹…Ù…¥±…‰±”°(€€€€€•ÍÑ…‰±¥Í¡5…¥1¥¹­M•ÍÍ¥½¸èÕ¹…Ù…¥±…‰±”°(€€€€€Í¥¹=ÕÐèÕ¹…Ù…¥±…‰±”°(€€€€€É•ÍÑ½É•M•ÍÍ¥½¸èÕ¹…Ù…¥±…‰±”°(€€€€€É•™É•Í¡M•ÍÍ¥½¸èÕ¹…Ù…¥±…‰±”°(€€€€€•Ñ•ÍÍQ½­•¸è…Íå¹Œ€ ¤€ôø€ˆˆ°(€€€€€Ù•É¥™å=Ý¹•É5•µ‰•ÉÍ¡¥ÀèÕ¹…Ù…¥±…‰±”°(€€€€€‰½½ÑÍÑÉ…Á¥ÉÍÑ=Ý¹•ÈèÕ¹…Ù…¥±…‰±”°(€€€€€½¹ÕÑ¡MÑ…Ñ•¡…¹”è€ ¤€ôø=‰©•Ð¹™É••é”¡ìÕ¹ÍÕ‰ÍÉ¥‰” ¤íôô¤°(€€€€€ÍÑ…ÑÕÌè€ ¤€ôø=‰©•Ð¹™É••é”¡ì½¹™¥ÕÉ•è™…±Í”°Í¥¹•‘%¸è™…±Í”°ÕÍ•Èè¹Õ±°°•áÁ¥É•ÍÐè¹Õ±°°Í•ÍÍ¥½¹MÑ½É…•-•äè€ˆˆô¤°(€€€€€Í•ÍÍ¥½¹MÑ½É…•-•äè€ˆˆ°(€€€ô¤ì(€ô((€™Õ¹Ñ¥½¸É•…Ñ•IÕ¹Ñ¥µ•ÕÑ¡%¹Ñ•É…Ñ¥½¸¡ì½¹™¥œ°…ÕÑ¡AÉ½Ù¥‘•È°½¹™¥Á¤°™•Ñ¡%µÁ°°•Ù•¹ÑQ…É•Ð°…±±‰…­¥…¹½ÍÑ¥MÑ½É…”ô€ôíô¤ì(€€€½¹ÍÐÁÉ½Ù¥‘•È€ô…ÕÑ¡AÉ½Ù¥‘•ÈñðÉ•…Ñ•U¹…Ù…¥±…‰±•AÉ½Ù¥‘•È ‰MUA	M}AU	1%}=9%}IEU%Iˆ¤ì(€€€½¹ÍÐÁÕ‰±¥½¹™¥œ€ô½¹™¥œ€˜˜ÑåÁ•½˜½¹™¥œ€ôôô€‰½‰©•Ðˆ€ü½¹™¥œ€è¹Õ±°ì(€€€½¹ÍÐÑ…É•Ð€ô•Ù•¹ÑQ…É•Ðñð¹Õ±°ì(€€€½¹ÍÐ…±±‰…­¥…¹½ÍÑ¥Ì€ôÉ•…Ñ•…±±‰…­¥…¹½ÍÑ¥MÑ½É”¡…±±‰…­¥…¹½ÍÑ¥MÑ½É…”¤ì(€€€±•Ð½Ý¹•ÉY•É¥™¥•€ô™…±Í”ì(€€€±•Ð…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ô€‰¥‘±”ˆì(€€€±•Ð½Ý¹•É	½½ÑÍÑÉ…ÁA¡…Í”€ô€‰¥‘±”ˆì(€€€±•Ð±…ÍÑ½‘”€ôÁÕ‰±¥½¹™¥œ€ü€‰MUA	M}UQ!}M%9}=UPˆ€è€‰MUA	M}AU	1%}=9%}IEU%Iˆì(€€€±•Ð…±±‰…­MÑ…”€ô€ˆˆì(€€€±•Ð±…ÍÑAÕÍ¡I•ÍÕ±Ð€ô¹Õ±°ì((€€€™Õ¹Ñ¥½¸Íå¹½¹™¥ÕÉ…Ñ¥½¸¡•¹…‰±•€ô…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ôôô€‰…ÕÑ¡½É¥é•ˆñð…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ôôô€‰¥¸µ™±¥¡Ðˆ¤ì(€€€€€¥˜€ …ÁÕ‰±¥½¹™¥œ¤ì(€€€€€€€É•ÑÕÉ¸=‰©•Ð¹™É••é”¡ì•¹…‰±•è™…±Í”°µ½‘”è€‰±½…°µ½¹±äˆ°½‘”è€‰MUA	M}AU	1%}=9%}IEU%Iˆ°•áÁ•Ñ•‘AÉ•Ù¥½ÕÍI•Ù¥Í¥½¸è€Àô¤ì(€€€€€ô(€€€€€É•ÑÕÉ¸=‰©•Ð¹™É••é”¡ì(€€€€€€€•¹…‰±•è•¹…‰±•€ôôôÑÉÕ”°(€€€€€€€µ½‘”è•¹…‰±•€ôôôÑÉÕ”€ü€‰ÁÕÍ µ½¹±äˆ€è€‰±½…°µ½¹±äˆ°(€€€€€€€½‘”è•¹…‰±•€ôôôÑÉÕ”€ü€ˆˆ€è±…ÍÑ½‘”ñð€‰MUA	M}=I51}AUM!}9=Q}UQ!=I%iˆ°(€€€€€€€ÕÉ°èMÑÉ¥¹œ¡ÁÕ‰±¥½¹™¥œ¹ÁÉ½©•ÑUÉ°ñð€ˆˆ¤°(€€€€€€€…¹½¹-•äèMÑÉ¥¹œ¡ÁÕ‰±¥½¹™¥œ¹ÁÕ‰±¥Í¡…‰±•-•äñð€ˆˆ¤°(€€€€€€€½É…¹¥é…Ñ¥½¹%èMÑÉ¥¹œ¡ÁÕ‰±¥½¹™¥œ¹½É…¹¥é…Ñ¥½¹%ñð€ˆˆ¤°(€€€€€€€½É…¹¥é…Ñ¥½¹M±ÕœèMÑÉ¥¹œ¡ÁÕ‰±¥½¹™¥œ¹½É…¹¥é…Ñ¥½¹M±Õœñð€ˆˆ¤°(€€€€€€€•áÁ•Ñ•‘AÉ•Ù¥½ÕÍI•Ù¥Í¥½¸è9Õµ‰•È¡ÁÕ‰±¥½¹™¥œ¹•áÁ•Ñ•‘AÉ•Ù¥½ÕÍI•Ù¥Í¥½¸¤°(€€€€€€€•Ñ•ÍÍQ½­•¸èÁÉ½Ù¥‘•È¹•Ñ•ÍÍQ½­•¸°(€€€€€€€™•Ñ¡%µÁ°èÑåÁ•½˜™•Ñ¡%µÁ°€ôôô€‰™Õ¹Ñ¥½¸ˆ€ü™•Ñ¡%µÁ°€èÕ¹‘•™¥¹•°(€€€€€ô¤ì(€€€ô((€€€™Õ¹Ñ¥½¸ÁÕ‰±¥MÑ…ÑÕÌ ¤ì(€€€€€½¹ÍÐ…ÕÑ €ôÁÉ½Ù¥‘•È¹ÍÑ…ÑÕÌ ¤ì(€€€€€½¹ÍÐ…¹	½½ÑÍÑÉ…Á¥ÉÍÑ=Ý¹•È€ô	½½±•…¸ (€€€€€€€ÁÕ‰±¥½¹™¥œ(€€€€€€€€˜˜…ÕÑ ¹Í¥¹•‘%¸(€€€€€€€€˜˜€…½Ý¹•ÉY•É¥™¥•(€€€€€€€€˜˜½Ý¹•É	½½ÑÍÑÉ…ÁA¡…Í”€ôôô€‰¥‘±”ˆ(€€€€€€€€˜˜±…ÍÑ½‘”€ôôô€‰MUA	M}UQ!}55	IM!%A}%9Y1%ˆ(€€€€€€¤ì(€€€€€É•ÑÕÉ¸=‰©•Ð¹™É••é”¡ì(€€€€€€€½¹™¥ÕÉ•è	½½±•…¸¡ÁÕ‰±¥½¹™¥œ€˜˜…ÕÑ ¹½¹™¥ÕÉ•¤°(€€€€€€€½¹™¥½‘”èÁÕ‰±¥½¹™¥œ€ü€ˆˆ€è€‰MUA	M}AU	1%}=9%}IEU%Iˆ°(€€€€€€€Í¥¹•‘%¸è…ÕÑ ¹Í¥¹•‘%¸€ôôôÑÉÕ”°(€€€€€€€ÕÍ•Èè…ÕÑ ¹ÕÍ•Èñð¹Õ±°°(€€€€€€€½Ý¹•ÉY•É¥™¥•°(€€€€€€€™½Éµ…±ÕÑ¡½É¥é•è…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ôôô€‰…ÕÑ¡½É¥é•ˆ°(€€€€€€€Á¡…Í”è…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”°(€€€€€€€…¹ÕÑ¡½É¥é”è	½½±•…¸¡ÁÕ‰±¥½¹™¥œ€˜˜…ÕÑ ¹Í¥¹•‘%¸€˜˜½Ý¹•ÉY•É¥™¥•€˜˜…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ôôô€‰¥‘±”ˆ¤°(€€€€€€€…¹AÕÍ è	½½±•…¸¡ÁÕ‰±¥½¹™¥œ€˜˜…ÕÑ ¹Í¥¹•‘%¸€˜˜½Ý¹•ÉY•É¥™¥•€˜˜…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ôôô€‰…ÕÑ¡½É¥é•ˆ¤°(€€€€€€€…¹	½½ÑÍÑÉ…Á¥ÉÍÑ=Ý¹•È°(€€€€€€€½Ý¹•É	½½ÑÍÑÉ…ÁA¡…Í”°(€€€€€€€½‘”èMÑÉ¥¹œ¡±…ÍÑ½‘”ñð€ˆˆ¤°(€€€€€€€…±±‰…­MÑ…”°(€€€€€€€±…ÍÑAÕÍ¡=¬è±…ÍÑAÕÍ¡I•ÍÕ±Ðü¹½¬€ôôôÑÉÕ”°(€€€€€ô¤ì(€€€ô((€€€™Õ¹Ñ¥½¸ÁÕ‰±¥Í  ¤ì(€€€€€½¹ÍÐ™……‘”€ôÍå¹½¹™¥ÕÉ…Ñ¥½¸ ¤ì(€€€€€¥˜€¡½¹™¥Á¤€˜˜ÑåÁ•½˜½¹™¥Á¤¹ÁÕ‰±¥Í¡Må¹……‘”€ôôô€‰™Õ¹Ñ¥½¸ˆ¤½¹™¥Á¤¹ÁÕ‰±¥Í¡Må¹……‘”¡™……‘”¤ì(€€€€€½¹ÍÐÍÑ…ÑÕÌ€ôÁÕ‰±¥MÑ…ÑÕÌ ¤ì(€€€€€¥˜€¡Ñ…É•Ð€˜˜ÑåÁ•½˜Ñ…É•Ð¹‘¥ÍÁ…Ñ¡Ù•¹Ð€ôôô€‰™Õ¹Ñ¥½¸ˆ€˜˜ÑåÁ•½˜É½½Ðü¹ÕÍÑ½µÙ•¹Ð€ôôô€‰™Õ¹Ñ¥½¸ˆ¤ì(€€€€€€€ÑÉäì(€€€€€€€€€Ñ…É•Ð¹‘¥ÍÁ…Ñ¡Ù•¹Ð¡¹•ÜÉ½½Ð¹ÕÍÑ½µÙ•¹Ð ‰µ…Ñ•É¥…±ÌµÅÕ½Ñ”µÍÕÁ…‰…Í”µ…ÕÑ µ¡…¹”ˆ°ì‘•Ñ…¥°èÍÑ…ÑÕÌô¤¤ì(€€€€€€€ô…Ñ €¡•ÉÉ½È¤ì(€€€€€€€€€€¼¼U$¹½Ñ¥™¥…Ñ¥½¸™…¥±ÕÉ”µÕÍÐ¹½Ð…±Ñ•È…ÕÑ¡½É¥é…Ñ¥½¸¸(€€€€€€€ô(€€€€€ô(€€€€€É•ÑÕÉ¸ÍÑ…ÑÕÌì(€€€ô((€€€…Íå¹Œ™Õ¹Ñ¥½¸¥¹¥Ñ¥…±¥é”¡…±±‰…­M½ÕÉ”€ô¹Õ±°¤ì(€€€€€½¹ÍÐ¡…‘…±±‰…¬€ô	½½±•…¸¡…±±‰…­M½ÕÉ”¤ì(€€€€€½¹ÍÐÉ•ÍÑ½É•€ô…±±‰…­M½ÕÉ”(€€€€€€€€ü…Ý…¥ÐÁÉ½Ù¥‘•È¹•ÍÑ…‰±¥Í¡5…¥1¥¹­M•ÍÍ¥½¸¡…±±‰…­M½ÕÉ”¤(€€€€€€€€è…Ý…¥ÐÁÉ½Ù¥‘•È¹É•ÍÑ½É•M•ÍÍ¥½¸ ¤ì(€€€€€½Ý¹•ÉY•É¥™¥•€ô™…±Í”ì(€€€€€…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ô€‰¥‘±”ˆì(€€€€€¥˜€¡¡…‘…±±‰…¬¤ì(€€€€€€€½¹ÍÐ‘¥…¹½ÍÑ¥Œ€ô…±±‰…­¥…¹½ÍÑ¥Ì¹ÝÉ¥Ñ”¡…±±‰…­¥…¹½ÍÑ¥½ÉI•ÍÕ±Ð¡…±±‰…­M½ÕÉ”°É•ÍÑ½É•¤¤ì(€€€€€€€±…ÍÑ½‘”€ô‘¥…¹½ÍÑ¥Œ¹½‘”ì(€€€€€€€…±±‰…­MÑ…”€ô‘¥…¹½ÍÑ¥Œ¹ÍÑ…”ì(€€€€€ô•±Í”¥˜€ …É•ÍÑ½É•¹½¬¤ì(€€€€€€€½¹ÍÐÁÉ•Ù¥½ÕÌ€ô…±±‰…­¥…¹½ÍÑ¥Ì¹É•… ¤ì(€€€€€€€½¹ÍÐ‘¥…¹½ÍÑ¥Œ€ôÁÉ•Ù¥½ÕÌñð…±±‰…­¥…¹½ÍÑ¥Ì¹ÝÉ¥Ñ” (€€€€€€€€€É•ÍÑ½É•¹½‘”€ôôô€‰MUA	M}UQ!}MMM%=9}MQ=I}%1ˆ(€€€€€€€€€€€€ü11	-}%9=MQ%}MQQUML¹ÍÑ½É…”(€€€€€€€€€€€€è11	-}%9=MQ%}MQQUML¹¹½…±±‰…¬°(€€€€€€€€¤ì(€€€€€€€±…ÍÑ½‘”€ô‘¥…¹½ÍÑ¥Œ¹½‘”ì(€€€€€€€…±±‰…­MÑ…”€ô‘¥…¹½ÍÑ¥Œ¹ÍÑ…”ì(€€€€€ô•±Í”ì(€€€€€€€±…ÍÑ½‘”€ô€‰MUA	M}UQ!}=]9I}Q}IEU%Iˆì(€€€€€€€…±±‰…­MÑ…”€ô€ˆˆì(€€€€€ô(€€€€€ÁÕ‰±¥Í  ¤ì(€€€€€É•ÑÕÉ¸É•ÍÑ½É•ì(€€€ô((€€€…Íå¹Œ™Õ¹Ñ¥½¸Í¥¹%¹]¥Ñ¡A…ÍÍÝ½É¡•µ…¥°°Á…ÍÍÝ½É¤ì(€€€€€…±±‰…­¥…¹½ÍÑ¥Ì¹±•…È ¤ì(€€€€€…±±‰…­MÑ…”€ô€ˆˆì(€€€€€…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ô€‰¥‘±”ˆì(€€€€€½Ý¹•ÉY•É¥™¥•€ô™…±Í”ì(€€€€€¥˜€¡½Ý¹•É	½½ÑÍÑÉ…ÁA¡…Í”€„ôô€‰½¹ÍÕµ•ˆ¤½Ý¹•É	½½ÑÍÑÉ…ÁA¡…Í”€ô€‰¥‘±”ˆì(€€€€€±…ÍÑAÕÍ¡I•ÍÕ±Ð€ô¹Õ±°ì(€€€€€½¹ÍÐÍ¥¹•‘%¸€ô…Ý…¥ÐÁÉ½Ù¥‘•È¹Í¥¹%¹]¥Ñ¡A…ÍÍÝ½É¡•µ…¥°°Á…ÍÍÝ½É¤ì(€€€€€¥˜€ …Í¥¹•‘%¸¹½¬¤ì(€€€€€€€±…ÍÑ½‘”€ôÍ¥¹•‘%¸¹½‘”ì(€€€€€€€ÁÕ‰±¥Í  ¤ì(€€€€€€€É•ÑÕÉ¸Í¥¹•‘%¸ì(€€€€€ô(€€€€€½¹ÍÐ…Ñ”€ô…Ý…¥ÐÙ•É¥™å=Ý¹•É5•µ‰•ÉÍ¡¥À ¤ì(€€€€€É•ÑÕÉ¸…Ñ”¹½¬€üÍ¥¹•‘%¸€è…Ñ”ì(€€€ô((€€€…Íå¹Œ™Õ¹Ñ¥½¸Í¥¹=ÕÐ ¤ì(€€€€€…±±‰…­¥…¹½ÍÑ¥Ì¹±•…È ¤ì(€€€€€…±±‰…­MÑ…”€ô€ˆˆì(€€€€€±…ÍÑ½‘”€ô€‰MUA	M}UQ!}M%9}=UPˆì(€€€€€…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ô€‰¥‘±”ˆì(€€€€€½Ý¹•ÉY•É¥™¥•€ô™…±Í”ì(€€€€€±…ÍÑAÕÍ¡I•ÍÕ±Ð€ô¹Õ±°ì(€€€€€½¹ÍÐÉ•ÍÕ±Ð€ô…Ý…¥ÐÁÉ½Ù¥‘•È¹Í¥¹=ÕÐ ¤ì(€€€€€±…ÍÑ½‘”€ôÉ•ÍÕ±Ð¹½¬€ü€‰MUA	M}UQ!}M%9}=UPˆ€èÉ•ÍÕ±Ð¹½‘”ì(€€€€€ÁÕ‰±¥Í  ¤ì(€€€€€É•ÑÕÉ¸É•ÍÕ±Ðì(€€€ô((€€€…Íå¹Œ™Õ¹Ñ¥½¸Ù•É¥™å=Ý¹•É5•µ‰•ÉÍ¡¥À ¤ì(€€€€€¥˜€ …ÁÕ‰±¥½¹™¥œ¤ì(€€€€€€€±…ÍÑ½‘”€ô€‰MUA	M}AU	1%}=9%}IEU%Iˆì(€€€€€€€½Ý¹•ÉY•É¥™¥•€ô™…±Í”ì(€€€€€€€ÁÕ‰±¥Í  ¤ì(€€€€€€€É•ÑÕÉ¸•ÉÉ½ÉI•ÍÕ±Ð¡±…ÍÑ½‘”¤ì(€€€€€ô(€€€€€½¹ÍÐ…Ñ”€ô…Ý…¥ÐÁÉ½Ù¥‘•È¹Ù•É¥™å=Ý¹•É5•µ‰•ÉÍ¡¥À ¤ì(€€€€€½Ý¹•ÉY•É¥™¥•€ô…Ñ”¹½¬€ôôôÑÉÕ”ì(€€€€€±…ÍÑ½‘”€ô…Ñ”¹½¬€ü€‰MUA	M}=I51}AUM!}=9%I5Q%=9}IEU%Iˆ€è…Ñ”¹½‘”ì(€€€€€¥˜€ ……Ñ”¹½¬¤…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ô…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ôôô€‰½¹ÍÕµ•ˆ€ü€‰½¹ÍÕµ•ˆ€è€‰¥‘±”ˆì(€€€€€ÁÕ‰±¥Í  ¤ì(€€€€€É•ÑÕÉ¸…Ñ”ì(€€€ô((€€€…Íå¹Œ™Õ¹Ñ¥½¸‰½½ÑÍÑÉ…Á¥ÉÍÑ=Ý¹•È ¤ì(€€€€€½¹ÍÐ…ÕÑ €ôÁÉ½Ù¥‘•È¹ÍÑ…ÑÕÌ ¤ì(€€€€€¥˜€ …ÁÕ‰±¥½¹™¥œ¤É•ÑÕÉ¸•ÉÉ½ÉI•ÍÕ±Ð ‰MUA	M}AU	1%}=9%}IEU%Iˆ¤ì(€€€€€¥˜€ ……ÕÑ ¹Í¥¹•‘%¸¤É•ÑÕÉ¸•ÉÉ½ÉI•ÍÕ±Ð ‰MUA	M}UQ!}M%9}=UPˆ¤ì(€€€€€¥˜€¡½Ý¹•É	½½ÑÍÑÉ…ÁA¡…Í”€ôôô€‰¥¸µ™±¥¡Ðˆ¤É•ÑÕÉ¸•ÉÉ½ÉI•ÍÕ±Ð ‰MUA	M}UQ!}=]9I}	==QMQIA}%9}1%!Pˆ¤ì(€€€€€¥˜€¡½Ý¹•É	½½ÑÍÑÉ…ÁA¡…Í”€ôôô€‰½¹ÍÕµ•ˆ¤É•ÑÕÉ¸•ÉÉ½ÉI•ÍÕ±Ð ‰MUA	M}UQ!}=]9I}	==QMQIA}1Ie}=9MU5ˆ¤ì(€€€€€¥˜€¡½Ý¹•ÉY•É¥™¥•ñð±…ÍÑ½‘”€„ôô€‰MUA	M}UQ!}55	IM!%A}%9Y1%ˆ¤ì(€€€€€€€É•ÑÕÉ¸•ÉÉ½ÉI•ÍÕ±Ð ‰MUA	M}UQ!}=]9I}	==QMQIA}9=Q}Y%1	1ˆ¤ì(€€€€€ô(€€€€€½Ý¹•É	½½ÑÍÑÉ…ÁA¡…Í”€ô€‰¥¸µ™±¥¡Ðˆì(€€€€€±…ÍÑ½‘”€ô€‰MUA	M}UQ!}=]9I}	==QMQIA}%9}1%!Pˆì(€€€€€ÁÕ‰±¥Í  ¤ì(€€€€€½¹ÍÐÉ•…Ñ•€ô…Ý…¥ÐÁÉ½Ù¥‘•È¹‰½½ÑÍÑÉ…Á¥ÉÍÑ=Ý¹•È ¤ì(€€€€€½Ý¹•É	½½ÑÍÑÉ…ÁA¡…Í”€ô€‰½¹ÍÕµ•ˆì(€€€€€¥˜€ …É•…Ñ•¹½¬¤ì(€€€€€€€½Ý¹•ÉY•É¥™¥•€ô™…±Í”ì(€€€€€€€±…ÍÑ½‘”€ôÉ•…Ñ•¹½‘”ì(€€€€€€€ÁÕ‰±¥Í  ¤ì(€€€€€€€É•ÑÕÉ¸É•…Ñ•ì(€€€€€ô(€€€€€½¹ÍÐ…Ñ”€ô…Ý…¥ÐÁÉ½Ù¥‘•È¹Ù•É¥™å=Ý¹•É5•µ‰•ÉÍ¡¥À ¤ì(€€€€€½Ý¹•ÉY•É¥™¥•€ô…Ñ”¹½¬€ôôôÑÉÕ”ì(€€€€€±…ÍÑ½‘”€ô…Ñ”¹½¬(€€€€€€€€ü€‰MUA	M}=I51}AUM!}=9%I5Q%=9}IEU%Iˆ(€€€€€€€€è€‰MUA	M}UQ!}=]9I}	==QMQIA}A=MQ!-}%1ˆì(€€€€€ÁÕ‰±¥Í  ¤ì(€€€€€É•ÑÕÉ¸…Ñ”¹½¬(€€€€€€€€ü=‰©•Ð¹™É••é”¡ì½¬èÑÉÕ”°½‘”è€ˆˆ°É½±”è€‰½Ý¹•Èˆ°½É…¹¥é…Ñ¥½¹%èMÑÉ¥¹œ¡ÁÕ‰±¥½¹™¥œ¹½É…¹¥é…Ñ¥½¹%ñð€ˆˆ¤ô¤(€€€€€€€€è•ÉÉ½ÉI•ÍÕ±Ð¡±…ÍÑ½‘”¤ì(€€€ô((€€€…Íå¹Œ™Õ¹Ñ¥½¸…ÕÑ¡½É¥é•½Éµ…±AÕÍ¡=¹”¡ì½¹™¥Éµ…Ñ¥½¸°…ÉÑ¥™…Ñ…Ñ•Í•ÁÑ•ô€ôíô¤ì(€€€€€¥˜€¡…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ôôô€‰¥¸µ™±¥¡Ðˆ¤É•ÑÕÉ¸•ÉÉ½ÉI•ÍÕ±Ð ‰MUA	M}=I51}AUM!}%9}1%!Pˆ¤ì(€€€€€¥˜€¡…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ôôô€‰½¹ÍÕµ•ˆ¤É•ÑÕÉ¸•ÉÉ½ÉI•ÍÕ±Ð ‰MUA	M}=I51}AUM!}1Ie}=9MU5ˆ¤ì(€€€€€¥˜€ …ÁÕ‰±¥½¹™¥œ¤É•ÑÕÉ¸•ÉÉ½ÉI•ÍÕ±Ð ‰MUA	M}AU	1%}=9%}IEU%Iˆ¤ì(€€€€€¥˜€¡½¹™¥Éµ…Ñ¥½¸€„ôô=I51}AUM!}=9%I5Q%=8ñð…ÉÑ¥™…Ñ…Ñ•Í•ÁÑ•€„ôôÑÉÕ”¤ì(€€€€€€€±…ÍÑ½‘”€ô€‰MUA	M}=I51}AUM!}=9%I5Q%=9}IEU%Iˆì(€€€€€€€ÁÕ‰±¥Í  ¤ì(€€€€€€€É•ÑÕÉ¸•ÉÉ½ÉI•ÍÕ±Ð¡±…ÍÑ½‘”¤ì(€€€€€ô(€€€€€½¹ÍÐ…Ñ”€ô…Ý…¥ÐÙ•É¥™å=Ý¹•É5•µ‰•ÉÍ¡¥À ¤ì(€€€€€¥˜€ ……Ñ”¹½¬¤É•ÑÕÉ¸…Ñ”ì(€€€€€…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ô€‰…ÕÑ¡½É¥é•ˆì(€€€€€±…ÍÑ½‘”€ô€ˆˆì(€€€€€±…ÍÑAÕÍ¡I•ÍÕ±Ð€ô¹Õ±°ì(€€€€€ÁÕ‰±¥Í  ¤ì(€€€€€É•ÑÕÉ¸=‰©•Ð¹™É••é”¡ì½¬èÑÉÕ”°½‘”è€ˆˆô¤ì(€€€ô((€€€…Íå¹Œ™Õ¹Ñ¥½¸•á•ÕÑ•½Éµ…±AÕÍ ¡ÁÕÍ ¤ì(€€€€€¥˜€¡…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ôôô€‰¥¸µ™±¥¡Ðˆ¤É•ÑÕÉ¸•ÉÉ½ÉI•ÍÕ±Ð ‰MUA	M}=I51}AUM!}%9}1%!Pˆ¤ì(€€€€€¥˜€¡…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ôôô€‰½¹ÍÕµ•ˆ¤É•ÑÕÉ¸•ÉÉ½ÉI•ÍÕ±Ð ‰MUA	M}=I51}AUM!}1Ie}=9MU5ˆ¤ì(€€€€€¥˜€¡…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€„ôô€‰…ÕÑ¡½É¥é•ˆñðÑåÁ•½˜ÁÕÍ €„ôô€‰™Õ¹Ñ¥½¸ˆ¤ì(€€€€€€€É•ÑÕÉ¸•ÉÉ½ÉI•ÍÕ±Ð ‰MUA	M}=I51}AUM!}9=Q}UQ!=I%iˆ¤ì(€€€€€ô(€€€€€…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ô€‰¥¸µ™±¥¡Ðˆì(€€€€€±…ÍÑ½‘”€ô€ˆˆì(€€€€€ÁÕ‰±¥Í  ¤ì(€€€€€½¹ÍÐ…Ñ”€ô…Ý…¥ÐÁÉ½Ù¥‘•È¹Ù•É¥™å=Ý¹•É5•µ‰•ÉÍ¡¥À ¤ì(€€€€€½Ý¹•ÉY•É¥™¥•€ô…Ñ”¹½¬€ôôôÑÉÕ”ì(€€€€€¥˜€ ……Ñ”¹½¬¤ì(€€€€€€€…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ô€‰½¹ÍÕµ•ˆì(€€€€€€€±…ÍÑ½‘”€ô…Ñ”¹½‘”ì(€€€€€€€±…ÍÑAÕÍ¡I•ÍÕ±Ð€ô…Ñ”ì(€€€€€€€ÁÕ‰±¥Í  ¤ì(€€€€€€€É•ÑÕÉ¸…Ñ”ì(€€€€€ô(€€€€€±•ÐÉ•ÍÕ±Ðì(€€€€€ÑÉäì(€€€€€€€É•ÍÕ±Ð€ô…Ý…¥ÐÁÕÍ  ¤ì(€€€€€ô…Ñ €¡•ÉÉ½È¤ì(€€€€€€€É•ÍÕ±Ð€ô•ÉÉ½ÉI•ÍÕ±Ð ‰MUA	M}=I51}AUM!}%1ˆ¤ì(€€€€€ô(€€€€€¥˜€ …É•ÍÕ±ÐñðÑåÁ•½˜É•ÍÕ±Ð€„ôô€‰½‰©•Ðˆ¤É•ÍÕ±Ð€ô•ÉÉ½ÉI•ÍÕ±Ð ‰MUA	M}=I51}AUM!}IMU1Q}%9Y1%ˆ¤ì(€€€€€…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ô€‰½¹ÍÕµ•ˆì(€€€€€±…ÍÑ½‘”€ôÉ•ÍÕ±Ð¹½¬€ü€ˆˆ€èMÑÉ¥¹œ¡É•ÍÕ±Ð¹½‘”ñð€‰MUA	M}=I51}AUM!}%1ˆ¤ì(€€€€€±…ÍÑAÕÍ¡I•ÍÕ±Ð€ôÉ•ÍÕ±Ðì(€€€€€ÁÕ‰±¥Í  ¤ì(€€€€€É•ÑÕÉ¸É•ÍÕ±Ðì(€€€ô((€€€ÁÉ½Ù¥‘•È¹½¹ÕÑ¡MÑ…Ñ•¡…¹” ¡•Ù•¹Ð¤€ôøì(€€€€€¥˜€¡•Ù•¹Ð€ôôô€‰M%9}=UPˆ¤ì(€€€€€€€½Ý¹•ÉY•É¥™¥•€ô™…±Í”ì(€€€€€€€¥˜€¡…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€„ôô€‰½¹ÍÕµ•ˆ¤…ÕÑ¡½É¥é…Ñ¥½¹A¡…Í”€ô€‰¥‘±”ˆì(€€€€€€€½¹ÍÐ‘¥…¹½ÍÑ¥Œ€ô11	-}%9=MQ%}	e}=¹•Ð¡±…ÍÑ½‘”¤ì(€€€€€€€¥˜€ …‘¥…¹½ÍÑ¥Œñð‘¥…¹½ÍÑ¥Œ€ôôô11	-}%9=MQ%}MQQUML¹ÍÕ•ÍÌ¤ì(€€€€€€€€€±…ÍÑ½‘”€ô€‰MUA	M}UQ!}M%9}=UPˆì(€€€€€€€€€…±±‰…­MÑ…”€ô€ˆˆì(€€€€€€€ô(€€€€€ô(€€€€€ÁÕ‰±¥Í  ¤ì(€€€ô¤ì((€€€ÁÕ‰±¥Í  ¤ì((€€€É•ÑÕÉ¸=‰©•Ð¹™É••é”¡ì(€€€€€¥¹¥Ñ¥…±¥é”°(€€€€€Í¥¹%¹]¥Ñ¡A…ÍÍÝ½É°(€€€€€Í¥¹=ÕÐ°(€€€€€Ù•É¥™å=Ý¹•É5•µ‰•ÉÍ¡¥À°(€€€€€‰½½ÑÍÑÉ…Á¥ÉÍÑ=Ý¹•È°(€€€€€…ÕÑ¡½É¥é•½Éµ…±AÕÍ¡=¹”°(€€€€€•á•ÕÑ•½Éµ…±AÕÍ °(€€€€€•ÑMå¹½¹™¥ÕÉ…Ñ¥½¸èÍå¹½¹™¥ÕÉ…Ñ¥½¸°(€€€€€ÍÑ…ÑÕÌèÁÕ‰±¥MÑ…ÑÕÌ°(€€€€€…ÕÑ¡AÉ½Ù¥‘•ÈèÁÉ½Ù¥‘•È°(€€€ô¤ì(€ô((€™Õ¹Ñ¥½¸‰½½ÑÍÑÉ…Á	É½ÝÍ•ÉIÕ¹Ñ¥µ”¡‰É½ÝÍ•ÉI½½Ð€ôÉ½½Ð¤ì(€€€¥˜€ …‰É½ÝÍ•ÉI½½Ðñð‰É½ÝÍ•ÉI½½Ð¹5…Ñ•É¥…±ÍEÕ½Ñ•MÕÁ…‰…Í•IÕ¹Ñ¥µ”¤É•ÑÕÉ¸‰É½ÝÍ•ÉI½½Ðü¹5…Ñ•É¥…±ÍEÕ½Ñ•MÕÁ…‰…Í•IÕ¹Ñ¥µ”ñð¹Õ±°ì(€€€½¹ÍÐ½¹™¥Á¤€ô‰É½ÝÍ•ÉI½½Ð¹5…Ñ•É¥…±ÍEÕ½Ñ•MÕÁ…‰…Í•IÕ¹Ñ¥µ•½¹™¥œì(€€€½¹ÍÐ½¹™¥œ€ô½¹™¥Á¤ü¹•ÑÕÉÉ•¹Ñ½¹™¥ÕÉ…Ñ¥½¸ü¸ ¤ñð¹Õ±°ì(€€€½¹ÍÐ™•Ñ¡%µÁ°€ôÑåÁ•½˜‰É½ÝÍ•ÉI½½Ð¹™•Ñ €ôôô€‰™Õ¹Ñ¥½¸ˆ€ü‰É½ÝÍ•ÉI½½Ð¹™•Ñ ¹‰¥¹¡‰É½ÝÍ•ÉI½½Ð¤€è¹Õ±°ì(€€€±•Ð‰É½ÝÍ•ÉMÑ½É…”€ô¹Õ±°ì(€€€±•Ð…±±‰…­¥…¹½ÍÑ¥MÑ½É…”€ô¹Õ±°ì(€€€ÑÉäì(€€€€€‰É½ÝÍ•ÉMÑ½É…”€ô‰É½ÝÍ•ÉI½½Ð¹±½…±MÑ½É…”ì(€€€ô…Ñ €¡•ÉÉ½È¤ì(€€€€€‰É½ÝÍ•ÉMÑ½É…”€ô¹Õ±°ì(€€€ô(€€€ÑÉäì(€€€€€…±±‰…­¥…¹½ÍÑ¥MÑ½É…”€ô‰É½ÝÍ•ÉI½½Ð¹Í•ÍÍ¥½¹MÑ½É…”ì(€€€ô…Ñ €¡•ÉÉ½È¤ì(€€€€€…±±‰…­¥…¹½ÍÑ¥MÑ½É…”€ô¹Õ±°ì(€€€ô(€€€½¹ÍÐÁÉ½Ù¥‘•È€ô½¹™¥œ(€€€€€€üÉ•…Ñ•MÕÁ…‰…Í•ÕÑ¡AÉ½Ù¥‘•È¡ì½¹™¥œ°™•Ñ¡%µÁ°°ÍÑ½É…”è‰É½ÝÍ•ÉMÑ½É…”ô¤(€€€€€€èÉ•…Ñ•U¹…Ù…¥±…‰±•AÉ½Ù¥‘•È¡½¹™¥Á¤ü¹ÍÑ…ÑÕÌü¸ ¤¹½‘”ñð€‰MUA	M}AU	1%}=9%}IEU%Iˆ¤ì(€€€½¹ÍÐ¥¹Ñ•É…Ñ¥½¸€ôÉ•…Ñ•IÕ¹Ñ¥µ•ÕÑ¡%¹Ñ•É…Ñ¥½¸¡ì(€€€€€½¹™¥œ°(€€€€€…ÕÑ¡AÉ½Ù¥‘•ÈèÁÉ½Ù¥‘•È°(€€€€€½¹™¥Á¤°(€€€€€™•Ñ¡%µÁ°°(€€€€€•Ù•¹ÑQ…É•Ðè‰É½ÝÍ•ÉI½½Ð°(€€€€€…±±‰…­¥…¹½ÍÑ¥MÑ½É…”°(€€€ô¤ì(€€€‰É½ÝÍ•ÉI½½Ð¹5…Ñ•É¥…±ÍEÕ½Ñ•MÕÁ…‰…Í•IÕ¹Ñ¥µ”€ô¥¹Ñ•É…Ñ¥½¸ì(€€€‰É½ÝÍ•ÉI½½Ð¹5…Ñ•É¥…±ÍEÕ½Ñ•MÕÁ…‰…Í•Må¹½¹™¥œ€ô¥¹Ñ•É…Ñ¥½¸¹•ÑMå¹½¹™¥ÕÉ…Ñ¥½¸ ¤ì(€€€±•Ð…±±‰…­M½ÕÉ”€ô‰É½ÝÍ•ÉI½½Ð¹5…Ñ•É¥…±ÍEÕ½Ñ•MÕÁ…‰…Í•ÕÑ¡…±±‰…¬ñð¹Õ±°ì(€€€ÑÉäì(€€€€€‘•±•Ñ”‰É½ÝÍ•ÉI½½Ð¹5…Ñ•É¥…±ÍEÕ½Ñ•MÕÁ…‰…Í•ÕÑ¡…±±‰…¬ì(€€€ô…Ñ €¡•ÉÉ½È¤ì(€€€€€ÑÉäì(€€€€€€€‰É½ÝÍ•ÉI½½Ð¹5…Ñ•É¥…±ÍEÕ½Ñ•MÕÁ…‰…Í•ÕÑ¡…±±‰…¬€ô¹Õ±°ì(€€€€€ô…Ñ €¡¥¹½É•¤ì(€€€€€€€€¼¼Q¡”ÁÉ½Ù¥‘•ÈÍÑ¥±°•¹™½É•Ì„Í¥¹±”…±±‰…¬½¹ÍÕµÁÑ¥½¸¸(€€€€€ô(€€€ô(€€€AÉ½µ¥Í”¹É•Í½±Ù”¡¥¹Ñ•É…Ñ¥½¸¹¥¹¥Ñ¥…±¥é”¡…±±‰…­M½ÕÉ”¤¤¹Ñ¡•¸ ¡É•ÍÕ±Ð¤€ôøì(€€€€€…±±‰…­M½ÕÉ”€ô¹Õ±°ì(€€€€€¥˜€¡É•ÍÕ±Ðü¹½¬€ôôôÑÉÕ”€˜˜É•ÍÕ±Ð¹…±±‰…¬€˜˜‰É½ÝÍ•ÉI½½Ð¹±½…Ñ¥½¸¤ì(€€€€€€€‰É½ÝÍ•ÉI½½Ð¹±½…Ñ¥½¸¹¡…Í €ô€ˆŒ½Í•ÑÑ¥¹Ì½½µÁ…¹äˆì(€€€€€ô(€€€ô¤ì(€€€¥˜€¡½¹™¥œ€˜˜ÑåÁ•½˜‰É½ÝÍ•ÉI½½Ð¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È€ôôô€‰™Õ¹Ñ¥½¸ˆ¤ì(€€€€€‰É½ÝÍ•ÉI½½Ð¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰ÍÑ½É…”ˆ°€¡•Ù•¹Ð¤€ôøì(€€€€€€€¥˜€¡•Ù•¹Ðü¹­•ä€ôôôÁÉ½Ù¥‘•È¹Í•ÍÍ¥½¹MÑ½É…•-•ä¤¥¹Ñ•É…Ñ¥½¸¹¥¹¥Ñ¥…±¥é” ¤ì(€€€€€ô¤ì(€€€ô(€€€É•ÑÕÉ¸¥¹Ñ•É…Ñ¥½¸ì(€ô((€É•ÑÕÉ¸=‰©•Ð¹™É••é”¡ì(€€€=I51}AUM!}=9%I5Q%=8°(€€€UQ!}IU9Q%5}YIM%=8°(€€€5%}1%9-}11	-}UI0°(€€€5%}1%9-}11	-}UI1L°(€€€11	-}%9=MQ%}MQ=I}-d°(€€€11	-}%9=MQ%}MQQUML°(€€€Á…ÉÍ•5…¥1¥¹­…±±‰…¬°(€€€Ù…±¥‘…Ñ•5…¥1¥¹­•ÍÍQ½­•¸°(€€€É•…Ñ•MÕÁ…‰…Í•ÕÑ¡AÉ½Ù¥‘•È°(€€€É•…Ñ•IÕ¹Ñ¥µ•ÕÑ¡%¹Ñ•É…Ñ¥½¸°(€€€‰½½ÑÍÑÉ…Á	É½ÝÍ•ÉIÕ¹Ñ¥µ”°(€ô¤ì)ô¤ì(
