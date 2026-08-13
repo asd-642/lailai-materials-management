@@ -39,6 +39,10 @@ function formatWorkLogTime(date = new Date()) {
 }
 
 function loadWorkLogs() {
+  const sharedLogs = window.MaterialsQuoteSharedWorkingStateRuntime?.readPartition?.("work_logs");
+  if (Array.isArray(sharedLogs)) {
+    return sharedLogs.map((entry) => window.AuthEventContract?.canonicalAuthEvent(entry) || entry);
+  }
   try {
     const saved = localStorage.getItem(WORK_LOGS_KEY);
     const logs = saved ? JSON.parse(saved) : [];
@@ -51,7 +55,13 @@ function loadWorkLogs() {
 
 function saveWorkLogs(logs) {
   const normalized = logs.map((entry) => window.AuthEventContract?.canonicalAuthEvent(entry) || entry);
+  const sharedRuntime = window.MaterialsQuoteSharedWorkingStateRuntime;
+  if (sharedRuntime?.isDraftActive?.()) {
+    return sharedRuntime.capturePartition("work_logs", normalized.slice(0, WORK_LOG_LIMIT)) === true;
+  }
+  if (sharedRuntime?.requiresGateway?.()) return false;
   localStorage.setItem(WORK_LOGS_KEY, JSON.stringify(normalized.slice(0, WORK_LOG_LIMIT)));
+  return true;
 }
 
 function workLogActor(account = currentUser()) {
@@ -83,6 +93,8 @@ function workLogRecordTitle(collection, record) {
 }
 
 function logWorkEvent(action, summary, options = {}) {
+  const sharedRuntime = window.MaterialsQuoteSharedWorkingStateRuntime;
+  if (sharedRuntime?.requiresGateway?.() && !sharedRuntime?.isDraftActive?.()) return null;
   const now = new Date();
   const actor = workLogActor(options.actor);
   const entry = {
@@ -105,8 +117,7 @@ function logWorkEvent(action, summary, options = {}) {
   };
   const logs = loadWorkLogs();
   logs.unshift(entry);
-  saveWorkLogs(logs);
-  return entry;
+  return saveWorkLogs(logs) ? entry : null;
 }
 
 function logRecordChange(collection, action, record, detail = "") {

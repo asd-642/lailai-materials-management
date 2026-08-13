@@ -1,4 +1,5 @@
 function render() {
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.deferEffect?.("render", [])) return;
   if (typeof cleanupBugReportObjectUrls === "function") cleanupBugReportObjectUrls();
   const app = document.getElementById("app");
   const r = route();

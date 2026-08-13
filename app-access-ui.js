@@ -18,13 +18,23 @@ function isFrontendRoleKnown() {
   return ACCOUNT_ROLES.includes(frontendAccessRole());
 }
 
+function sharedWorkingStateAccessStatus() {
+  const status = window.MaterialsQuoteSharedWorkingStateRuntime?.status?.();
+  return status?.configured === true ? status : null;
+}
+
+function isSharedWorkingStateReadOnly() {
+  const status = sharedWorkingStateAccessStatus();
+  return Boolean(status && status.canMutate !== true);
+}
+
 function isFrontendReadOnly() {
   const role = frontendAccessRole();
-  return role === "contractor" || role === "unknown";
+  return role === "contractor" || role === "unknown" || isSharedWorkingStateReadOnly();
 }
 
 function canUseFrontendWrite() {
-  return ["owner", "admin", "staff"].includes(frontendAccessRole());
+  return ["owner", "admin", "staff"].includes(frontendAccessRole()) && !isSharedWorkingStateReadOnly();
 }
 
 function showFrontendWriteDeniedToastWithoutRender(message) {
@@ -49,11 +59,17 @@ function showFrontendWriteDeniedToastWithoutRender(message) {
 
 function frontendWriteDenied(options = {}) {
   const unknown = frontendAccessRole() === "unknown";
+  const sharedStatus = sharedWorkingStateAccessStatus();
+  const sharedDenied = !unknown && frontendAccessRole() !== "contractor" && sharedStatus?.canMutate !== true;
   const result = {
     ok: false,
     code: unknown ? "UNKNOWN_ROLE" : "READ_ONLY_ROLE",
     error: unknown ? "目前登入角色無法辨識，介面已鎖定為唯讀" : "外包人員僅可檢視，不能變更或匯出資料",
   };
+  if (sharedDenied) {
+    result.code = sharedStatus.code || "WORKING_STATE_READ_ONLY";
+    result.error = sharedStatus.message || "共享資料尚未完成遠端驗證，目前只能檢視";
+  }
   if (options.withoutRender === true) showFrontendWriteDeniedToastWithoutRender(result.error);
   else if (typeof setToast === "function") setToast(result.error);
   return result;
@@ -66,6 +82,15 @@ function requireFrontendWrite() {
 function renderFrontendReadOnlyBanner() {
   if (!isFrontendReadOnly()) return "";
   const unknown = frontendAccessRole() === "unknown";
+  const sharedStatus = sharedWorkingStateAccessStatus();
+  if (!unknown && frontendAccessRole() !== "contractor" && sharedStatus?.canMutate !== true) {
+    return `
+      <div class="frontend-readonly-banner is-shared" role="status" data-shared-working-state-banner>
+        <span class="frontend-readonly-mark" aria-hidden="true">雲端</span>
+        <span><strong>共享資料目前為唯讀</strong><small>${h(sharedStatus.message || "尚未完成遠端版本驗證")}</small></span>
+      </div>
+    `;
+  }
   const bugReportException = !unknown && route().parts[0] === "bug-reports";
   return `
     <div class="frontend-readonly-banner ${unknown ? "is-unknown" : ""}" role="status">
@@ -188,6 +213,7 @@ window.FrontendAccess = Object.freeze({
   isReadOnly: isFrontendReadOnly,
   canWrite: canUseFrontendWrite,
   assertWritable: requireFrontendWrite,
+  sharedStatus: sharedWorkingStateAccessStatus,
 });
 
 window.addEventListener("load", () => {

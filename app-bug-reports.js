@@ -54,15 +54,22 @@
     return ok({ name, type, size, bytes });
   }
 
-  function readReports(storage = root.localStorage) {
+  function resolveReportStorage(storage) {
+    if (storage !== undefined) return storage;
+    return root.MaterialsQuoteSharedWorkingStateRuntime?.bugReportStorage?.() || root.localStorage;
+  }
+
+  function readReports(storage) {
+    const target = resolveReportStorage(storage);
     try {
-      const parsed = JSON.parse(storage?.getItem(REPORTS_KEY) || "[]");
+      const parsed = JSON.parse(target?.getItem(REPORTS_KEY) || "[]");
       return Array.isArray(parsed) ? parsed : [];
     } catch (e) { return []; }
   }
 
-  function writeReports(reports, storage = root.localStorage) {
-    try { storage.setItem(REPORTS_KEY, JSON.stringify(reports)); return true; } catch (e) { return false; }
+  function writeReports(reports, storage) {
+    const target = resolveReportStorage(storage);
+    try { target.setItem(REPORTS_KEY, JSON.stringify(reports)); return true; } catch (e) { return false; }
   }
 
   function openAttachmentDb() {
@@ -86,6 +93,8 @@
   }
 
   function defaultAdapter() {
+    const sharedAdapter = root.MaterialsQuoteSharedWorkingStateRuntime?.bugAttachmentAdapter?.();
+    if (sharedAdapter) return sharedAdapter;
     return {
       put: (record) => withAttachmentStore("readwrite", (store, resolve) => { const req = store.put(record); req.onsuccess = () => resolve(record); }),
       get: (attachmentId) => withAttachmentStore("readonly", (store, resolve) => { const req = store.get(attachmentId); req.onsuccess = () => resolve(req.result || null); }),

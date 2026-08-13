@@ -1,4 +1,5 @@
 (function () {
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.requiresGateway?.()) return;
   const BATCH_ID = "business-card-batch-20260706";
   const VERSION = "20260706-local-002";
   const MARKER = "ocr_customer_batch_import_20260706";

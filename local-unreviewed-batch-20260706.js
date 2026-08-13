@@ -1,4 +1,5 @@
 (function () {
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.requiresGateway?.()) return;
   const MARKER = "local_unreviewed_batch_20260706_001";
   const STORAGE = "materials_quote_clone_state";
   const CUSTOMERS = [

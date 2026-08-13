@@ -288,6 +288,9 @@ function renderAuthoritativeSyncPanel() {
         phase: "idle",
         message: "Supabase 公開設定尚未完成；目前維持本機模式。",
       };
+  const shared = typeof window.getSharedWorkingStateDisplayState === "function"
+    ? window.getSharedWorkingStateDisplayState()
+    : { configured: false, phase: "local-only", canMutate: true, remoteVersion: null, message: "共同資料後端尚未啟用；目前維持既有本機模式。" };
   const artifactContract = window.MaterialsQuoteSupabaseRuntimeConfig?.APPROVED_ARTIFACTS || {};
   const callbackTelemetry = auth.callbackTelemetry && typeof auth.callbackTelemetry === "object"
     ? auth.callbackTelemetry
@@ -377,6 +380,12 @@ function renderAuthoritativeSyncPanel() {
         ${auth.configured ? signedInControls : `<p class="sub">公開 project URL、publishable key、project ref 與 organization 尚未由 09 注入並驗證；所有遠端要求均維持 0。</p>`}
         ${ownerBootstrapControls}
         ${formalControls}
+        <div class="hint ${shared.phase === "ready" ? "green" : "amber"}" data-shared-working-state-status data-shared-working-state-phase="${h(shared.phase || "local-only")}" role="status" aria-live="polite">${h(shared.message || (shared.phase === "ready" ? `共同資料已連線（版本 ${shared.remoteVersion}）` : "共同資料目前為唯讀"))}</div>
+        ${shared.configured ? `<div class="backup-actions">
+          <button class="btn outline" type="button" onclick="reloadSharedWorkingState()" ${shared.inFlight ? "disabled" : ""}>重新載入遠端版本</button>
+          ${shared.hasPendingDraft && shared.phase === "ready" ? `<button class="btn" type="button" onclick="reapplySharedWorkingStateDraft()">以最新版本重新送出未送出變更</button>` : ""}
+          ${shared.hasPendingDraft ? `<button class="btn outline" type="button" onclick="discardSharedWorkingStateDraft()">放棄未送出變更</button>` : ""}
+        </div>` : ""}
         <div class="hint ${status.phase === "success" ? "green" : "amber"}" data-authoritative-sync-status role="status" aria-live="polite">${h(status.message)}</div>
         <p class="sub">此階段只提供「本機 → Supabase」單向 push，不提供 pull 或 merge。遠端空白、organization、revision、hash、counts、idempotency 或 owner 授權任一不符時，整筆拒絕且不會部分寫入。</p>
         <div class="backup-actions">

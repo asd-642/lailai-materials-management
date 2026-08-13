@@ -267,6 +267,7 @@ function loadState() {
     console.warn(error);
   }
   const seeded = normalizeAppState(seedData());
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.requiresGateway?.()) return seeded;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
   } catch (error) {
@@ -283,6 +284,9 @@ function saveState() {
     return false;
   }
   state.meta = { ...(state.meta || {}), schema_version: DATA_SCHEMA_VERSION, updated_at: new Date().toISOString() };
+  const sharedRuntime = window.MaterialsQuoteSharedWorkingStateRuntime;
+  if (sharedRuntime?.isDraftActive?.()) return sharedRuntime.capturePartition("state", state) === true;
+  if (sharedRuntime?.requiresGateway?.()) return false;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     return true;
@@ -466,11 +470,14 @@ async function verifyAccountPassword(account, pin) {
 async function upgradeLegacyAccountPassword(account, pin) {
   if (!account || account.password_hash || !account.password) return account;
   const upgraded = normalizeAccountRecord({ ...account, password: "", password_hash: await hashNumericPin(pin) });
-  saveAccounts(loadAccounts().map((item) => (item.id === upgraded.id ? upgraded : item)));
+  if (!window.MaterialsQuoteSharedWorkingStateRuntime?.requiresGateway?.()) {
+    saveAccounts(loadAccounts().map((item) => (item.id === upgraded.id ? upgraded : item)));
+  }
   return upgraded;
 }
 
 async function migrateLegacyAccountPasswords() {
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.requiresGateway?.()) return loadAccounts({ persistMigration: false });
   const accounts = loadAccounts();
   let changed = false;
   const migrated = [];
@@ -520,6 +527,10 @@ function clearLoginFailures(account) {
 }
 
 function loadAccounts(options = {}) {
+  const sharedAccounts = window.MaterialsQuoteSharedWorkingStateRuntime?.readPartition?.("accounts");
+  if (Array.isArray(sharedAccounts)) {
+    return sharedAccounts.map(normalizeAccountRecord).filter((account) => account.account);
+  }
   let accounts = null;
   try {
     const saved = localStorage.getItem(ACCOUNTS_KEY);
@@ -566,6 +577,9 @@ function saveAccounts(accounts, options = {}) {
     });
     if (!guard.ok) return false;
   }
+  const sharedRuntime = window.MaterialsQuoteSharedWorkingStateRuntime;
+  if (sharedRuntime?.isDraftActive?.()) return sharedRuntime.capturePartition("accounts", records) === true;
+  if (sharedRuntime?.requiresGateway?.()) return false;
   localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(records));
   return true;
 }
@@ -644,6 +658,7 @@ function isAdmin() {
 
 function setAuthSession(account) {
   const user = normalizeAccountRecord(account);
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.deferEffect?.("setAuthSession", [user])) return;
   localStorage.setItem(AUTH_KEY, "yes");
   localStorage.setItem(AUTH_USER_KEY, JSON.stringify({
     id: user.id,
@@ -658,6 +673,7 @@ function setAuthSession(account) {
 }
 
 function clearAuthSession() {
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.deferEffect?.("clearAuthSession", [])) return;
   localStorage.removeItem(AUTH_KEY);
   localStorage.removeItem(AUTH_USER_KEY);
 }
@@ -678,6 +694,7 @@ function renderAvatar(account, className = "") {
 }
 
 function setToast(message) {
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.deferEffect?.("toast", [message])) return;
   ui.toast = message;
   render();
   window.clearTimeout(setToast.timer);
@@ -710,6 +727,8 @@ function dateToday() {
 }
 
 function currentQuoteSequence(dateISO) {
+  const inMemorySequence = Number(state.meta?.quote_sequences?.[dateISO] || 0);
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.requiresGateway?.()) return inMemorySequence;
   let latestStoredSequence = 0;
   try {
     const storedState = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
@@ -717,7 +736,7 @@ function currentQuoteSequence(dateISO) {
   } catch (error) {
     console.warn(error);
   }
-  return Math.max(Number(state.meta?.quote_sequences?.[dateISO] || 0), latestStoredSequence);
+  return Math.max(inMemorySequence, latestStoredSequence);
 }
 
 function previewNextQuoteNo(dateISO = dateToday()) {
@@ -792,6 +811,7 @@ function saveStoredQuoteDraft(markDirty = true) {
 
 function clearStoredQuoteDraft(source) {
   const targetSource = source || ui.quoteDraftSource || "new";
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.deferEffect?.("clearStoredQuoteDraft", [targetSource])) return;
   localStorage.removeItem(`${QUOTE_DRAFT_KEY}:${encodeURIComponent(targetSource)}`);
   try {
     const legacy = JSON.parse(localStorage.getItem(QUOTE_DRAFT_KEY) || "null");
@@ -809,6 +829,7 @@ function clearStoredQuoteDraft(source) {
 }
 
 function clearAllStoredQuoteDrafts() {
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.deferEffect?.("clearAllStoredQuoteDrafts", [])) return;
   Object.keys(localStorage).filter((key) => key === QUOTE_DRAFT_KEY || key.startsWith(`${QUOTE_DRAFT_KEY}:`)).forEach((key) => localStorage.removeItem(key));
   ui.quoteDraftSavedAt = "";
   ui.quoteDraftRestored = false;
@@ -1076,6 +1097,7 @@ function quoteDocumentContext(quote) {
 }
 
 function migrateLegacyIssuedQuoteSnapshots() {
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.requiresGateway?.()) return;
   let changed = false;
   state.quotes.forEach((quote) => {
     if (!quoteIsLocked(quote) || quote.document_snapshot) return;
@@ -1106,6 +1128,7 @@ function link(path) {
 }
 
 function go(path) {
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.deferEffect?.("go", [path])) return;
   location.hash = path;
 }
 

@@ -1,4 +1,5 @@
 (function () {
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.requiresGateway?.()) return;
   const VERSION = "company-materials-1150709-v3";
   const MARKER = "materials_company_catalog_1150709_v3";
   const STORAGE = "materials_quote_clone_state";

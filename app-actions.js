@@ -85,6 +85,10 @@ function activeAccountsWithPermission(accounts, permissionKey) {
 }
 
 window.resetDemo = function () {
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.status?.().configured) {
+    setToast("共同資料模式禁止用瀏覽器示範資料覆蓋遠端");
+    return { ok: false, code: "WORKING_STATE_BROWSER_SEED_BLOCKED" };
+  }
   if (!requirePermission("manage_accounts", "只有具備帳號管理權限的人員可以重置示範資料")) return;
   const actor = currentUser();
   state = seedData();
@@ -2644,6 +2648,44 @@ function restoreFileIdentity(file) {
   };
 }
 
+window.getSharedWorkingStateDisplayState = function () {
+  const runtime = window.MaterialsQuoteSharedWorkingStateRuntime;
+  const status = runtime?.status?.() || {
+    configured: false,
+    phase: "local-only",
+    code: "",
+    message: "共同資料後端尚未啟用；目前維持既有本機模式。",
+    canMutate: true,
+    remoteVersion: null,
+    hasPendingDraft: false,
+  };
+  return status;
+};
+
+window.reloadSharedWorkingState = async function () {
+  const runtime = window.MaterialsQuoteSharedWorkingStateRuntime;
+  if (!runtime?.status?.().configured) return { ok: false, code: "WORKING_STATE_DISABLED" };
+  const result = runtime.status().hasObservedRemote
+    ? await runtime.reloadLatest()
+    : await runtime.hydrate();
+  if (typeof render === "function") render();
+  return result;
+};
+
+window.discardSharedWorkingStateDraft = function () {
+  const runtime = window.MaterialsQuoteSharedWorkingStateRuntime;
+  const status = runtime?.discardPendingDraft?.();
+  if (typeof render === "function") render();
+  return status;
+};
+
+window.reapplySharedWorkingStateDraft = async function () {
+  const runtime = window.MaterialsQuoteSharedWorkingStateRuntime;
+  const result = await runtime?.reapplyPendingDraft?.();
+  if (typeof render === "function") render();
+  return result || { ok: false, code: "WORKING_STATE_PENDING_DRAFT_MISSING" };
+};
+
 function restoreFileIsStillSelected(input, file, identity) {
   const selected = input.files?.[0];
   return selected === file
@@ -3005,6 +3047,11 @@ window.exportDataBackup = async function (suffix = "") {
 
 window.importDataBackup = async function (event) {
   const input = event.currentTarget;
+  if (window.MaterialsQuoteSharedWorkingStateRuntime?.status?.().configured) {
+    setToast("共同資料模式禁止直接匯入覆蓋遠端；請先由治理流程核准新的匯入方案");
+    input.value = "";
+    return { ok: false, code: "WORKING_STATE_IMPORT_BLOCKED" };
+  }
   if (dataBackupRestoreInProgress) {
     setToast("另一個備份還原流程仍在進行，請稍後再試");
     input.value = "";
@@ -3591,7 +3638,106 @@ function refreshExpiredQuotes() {
   saveState();
 }
 
+const SHARED_WORKING_STATE_MUTATION_ACTION_NAMES = Object.freeze([
+  "login",
+  "logout",
+  "confirmOwnerBootstrap",
+  "createAccount",
+  "saveAccount",
+  "toggleAccountPermission",
+  "deleteAccount",
+  "submitMaterialCategory",
+  "saveMaterial",
+  "addMaterialSpecification",
+  "updateMaterialSpecification",
+  "deleteMaterialSpecification",
+  "importCustomerCardsBatch",
+  "saveCustomer",
+  "addContact",
+  "removeContact",
+  "saveTemplate",
+  "addPayment",
+  "removePayment",
+  "addTemplateLabor",
+  "removeLabor",
+  "deleteRecord",
+  "saveQuote",
+  "submitQuoteForApproval",
+  "submitQuoteFromDetail",
+  "approveQuote",
+  "returnQuoteForRevision",
+  "withdrawQuoteSubmission",
+  "withdrawPendingQuoteSubmission",
+  "confirmApprovalDecision",
+  "setQuoteStatus",
+  "createQuoteRevision",
+  "submitBugReport",
+  "updateBugReportStatus",
+  "saveSettings",
+  "savePersonalSettings",
+  "saveAvatarImage",
+  "changePersonalPassword",
+]);
+
+let sharedWorkingStateUiSnapshot = null;
+let sharedWorkingStateUiCandidate = null;
+
+function installSharedWorkingStateGateway() {
+  const runtime = window.MaterialsQuoteSharedWorkingStateRuntime;
+  if (!runtime?.requiresGateway?.()) return Promise.resolve(runtime?.status?.() || null);
+  runtime.installApplication({
+    beginDraft(payload) {
+      sharedWorkingStateUiSnapshot = ui;
+      ui = MaterialsQuoteDomain.deepClone(ui);
+      sharedWorkingStateUiCandidate = null;
+      state = normalizeAppState(MaterialsQuoteDomain.deepClone(payload.state));
+    },
+    endDraft(previous) {
+      sharedWorkingStateUiCandidate = ui;
+      if (sharedWorkingStateUiSnapshot) ui = sharedWorkingStateUiSnapshot;
+      state = normalizeAppState(MaterialsQuoteDomain.deepClone(previous.state));
+    },
+    commitConfirmed(payload) {
+      state = normalizeAppState(MaterialsQuoteDomain.deepClone(payload.state));
+      if (sharedWorkingStateUiCandidate) ui = sharedWorkingStateUiCandidate;
+      sharedWorkingStateUiSnapshot = null;
+      sharedWorkingStateUiCandidate = null;
+      return true;
+    },
+    flushEffects(effects) {
+      if (sharedWorkingStateUiCandidate) ui = sharedWorkingStateUiCandidate;
+      sharedWorkingStateUiSnapshot = null;
+      sharedWorkingStateUiCandidate = null;
+      (Array.isArray(effects) ? effects : []).forEach((effect) => {
+        const args = Array.isArray(effect.args) ? effect.args : [];
+        if (effect.type === "toast") setToast(...args);
+        else if (effect.type === "go") go(...args);
+        else if (effect.type === "render") render();
+        else if (effect.type === "setAuthSession") setAuthSession(...args);
+        else if (effect.type === "clearAuthSession") clearAuthSession();
+        else if (effect.type === "clearStoredQuoteDraft") clearStoredQuoteDraft(...args);
+        else if (effect.type === "clearAllStoredQuoteDrafts") clearAllStoredQuoteDrafts();
+      });
+    },
+    discardEffects() {
+      sharedWorkingStateUiSnapshot = null;
+      sharedWorkingStateUiCandidate = null;
+    },
+    notify(_code, message) {
+      setToast(message || "共享資料操作已拒絕，最後確認版本未變更");
+    },
+    render() {
+      if (typeof render === "function") render();
+    },
+  });
+  runtime.installMutationHandlers(SHARED_WORKING_STATE_MUTATION_ACTION_NAMES);
+  return runtime.initialize();
+}
+
 if (!location.hash) location.hash = isAuthed() ? "#/dashboard" : "#/login";
 refreshExpiredQuotes();
 migrateLegacyAccountPasswords().catch((error) => console.warn("Legacy account password migration failed", error));
 render();
+installSharedWorkingStateGateway().then(() => render()).catch(() => {
+  setToast("共同資料初始化失敗；所有共享修改已停用");
+});
