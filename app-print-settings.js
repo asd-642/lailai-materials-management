@@ -299,6 +299,36 @@ function renderAuthoritativeSyncPanel() {
     ? callbackTelemetry.parameterNames.join(",")
     : "";
   const callbackBoolean = (name) => callbackPresence[name] === true ? "1" : "0";
+  const passwordTelemetry = auth.passwordLoginTelemetry && typeof auth.passwordLoginTelemetry === "object"
+    ? auth.passwordLoginTelemetry
+    : { container: "other", fields: {}, types: {}, stage: "idle", reason: "NOT_PRESENT", flags: {}, presence: {} };
+  const passwordList = (group, scope) => Array.isArray(passwordTelemetry[group]?.[scope])
+    ? passwordTelemetry[group][scope].join(",")
+    : "";
+  const passwordBoolean = (group, name) => passwordTelemetry[group]?.[name] === true ? "1" : "0";
+  const passwordTelemetryAttributes = [
+    `data-supabase-auth-password-response-container="${h(passwordTelemetry.container || "other")}"`,
+    `data-supabase-auth-password-response-stage="${h(passwordTelemetry.stage || "idle")}"`,
+    `data-supabase-auth-password-response-reason="${h(passwordTelemetry.reason || "NOT_PRESENT")}"`,
+    `data-supabase-auth-password-response-top-fields="${h(passwordList("fields", "topLevel"))}"`,
+    `data-supabase-auth-password-response-data-fields="${h(passwordList("fields", "data"))}"`,
+    `data-supabase-auth-password-response-session-fields="${h(passwordList("fields", "session"))}"`,
+    `data-supabase-auth-password-response-user-fields="${h(passwordList("fields", "user"))}"`,
+    `data-supabase-auth-password-response-top-types="${h(passwordList("types", "topLevel"))}"`,
+    `data-supabase-auth-password-response-data-types="${h(passwordList("types", "data"))}"`,
+    `data-supabase-auth-password-response-session-types="${h(passwordList("types", "session"))}"`,
+    `data-supabase-auth-password-response-user-types="${h(passwordList("types", "user"))}"`,
+    `data-supabase-auth-password-response-duplicate="${passwordBoolean("flags", "duplicate")}"`,
+    `data-supabase-auth-password-response-mixed="${passwordBoolean("flags", "mixed")}"`,
+    `data-supabase-auth-password-response-conflict="${passwordBoolean("flags", "conflict")}"`,
+    `data-supabase-auth-password-response-unknown="${passwordBoolean("flags", "unknown")}"`,
+    `data-supabase-auth-password-response-has-data="${passwordBoolean("presence", "data")}"`,
+    `data-supabase-auth-password-response-has-session="${passwordBoolean("presence", "session")}"`,
+    `data-supabase-auth-password-response-has-user="${passwordBoolean("presence", "user")}"`,
+    `data-supabase-auth-password-response-has-error="${passwordBoolean("presence", "error")}"`,
+    `data-supabase-auth-password-response-has-weak-password="${passwordBoolean("presence", "weak_password")}"`,
+    `data-supabase-auth-password-response-has-weak-password-camel="${passwordBoolean("presence", "weakPassword")}"`,
+  ].join(" ");
   const signedInControls = auth.signedIn
     ? `<div class="form-grid" data-supabase-auth-signed-in>
         <div class="hint green">Supabase帳號已登入：${h(auth.user?.email || "已驗證使用者")}</div>
@@ -340,7 +370,7 @@ function renderAuthoritativeSyncPanel() {
       </div>`
     : "";
   return `
-    <section class="card" data-authoritative-sync-panel data-supabase-auth-runtime-state="${auth.signedIn ? "signed-in" : "signed-out"}" data-supabase-auth-code="${h(auth.code || "")}" data-supabase-auth-login-stage="${h(auth.loginStage || "idle")}" data-supabase-auth-callback-transport="${h(callbackTelemetry.transport || "none")}" data-supabase-auth-callback-parameters="${h(callbackParameterNames)}" data-supabase-auth-callback-stage="${h(callbackTelemetry.parseStage || "bridge")}" data-supabase-auth-callback-reject-reason="${h(callbackTelemetry.rejectReason || "NOT_PRESENT")}" data-supabase-auth-callback-has-query="${callbackBoolean("query")}" data-supabase-auth-callback-has-hash="${callbackBoolean("hash")}" data-supabase-auth-callback-has-code="${callbackBoolean("code")}" data-supabase-auth-callback-has-access-token="${callbackBoolean("access_token")}" data-supabase-auth-callback-has-refresh-token="${callbackBoolean("refresh_token")}" data-supabase-auth-callback-has-expires-in="${callbackBoolean("expires_in")}" data-supabase-auth-callback-has-expires-at="${callbackBoolean("expires_at")}" data-supabase-auth-callback-has-token-type="${callbackBoolean("token_type")}" data-supabase-auth-callback-has-type="${callbackBoolean("type")}" data-supabase-auth-callback-has-token-hash="${callbackBoolean("token_hash")}" data-supabase-auth-callback-has-error="${callbackBoolean("error")}" data-supabase-auth-callback-has-unknown="${callbackBoolean("unknown")}" data-supabase-auth-callback-has-duplicate="${callbackBoolean("duplicate")}">
+    <section class="card" data-authoritative-sync-panel data-supabase-auth-runtime-state="${auth.signedIn ? "signed-in" : "signed-out"}" data-supabase-auth-code="${h(auth.code || "")}" data-supabase-auth-login-stage="${h(auth.loginStage || "idle")}" data-supabase-auth-callback-transport="${h(callbackTelemetry.transport || "none")}" data-supabase-auth-callback-parameters="${h(callbackParameterNames)}" data-supabase-auth-callback-stage="${h(callbackTelemetry.parseStage || "bridge")}" data-supabase-auth-callback-reject-reason="${h(callbackTelemetry.rejectReason || "NOT_PRESENT")}" data-supabase-auth-callback-has-query="${callbackBoolean("query")}" data-supabase-auth-callback-has-hash="${callbackBoolean("hash")}" data-supabase-auth-callback-has-code="${callbackBoolean("code")}" data-supabase-auth-callback-has-access-token="${callbackBoolean("access_token")}" data-supabase-auth-callback-has-refresh-token="${callbackBoolean("refresh_token")}" data-supabase-auth-callback-has-expires-in="${callbackBoolean("expires_in")}" data-supabase-auth-callback-has-expires-at="${callbackBoolean("expires_at")}" data-supabase-auth-callback-has-token-type="${callbackBoolean("token_type")}" data-supabase-auth-callback-has-type="${callbackBoolean("type")}" data-supabase-auth-callback-has-token-hash="${callbackBoolean("token_hash")}" data-supabase-auth-callback-has-error="${callbackBoolean("error")}" data-supabase-auth-callback-has-unknown="${callbackBoolean("unknown")}" data-supabase-auth-callback-has-duplicate="${callbackBoolean("duplicate")}" ${passwordTelemetryAttributes}>
       <div class="card-header"><h2>Supabase authoritative 同步</h2></div>
       <div class="card-body">
         <div class="hint ${auth.ownerVerified ? "green" : "amber"}" data-supabase-auth-status role="status" aria-live="polite">${h(auth.message)}</div>

@@ -7,7 +7,7 @@
   "use strict";
 
   const FORMAL_PUSH_CONFIRMATION = "啟用唯一正式推送";
-  const AUTH_RUNTIME_VERSION = "20260813-password-login-response-shape-001";
+  const AUTH_RUNTIME_VERSION = "20260813-password-login-inner-shape-telemetry-001";
   const SESSION_REFRESH_MARGIN_SECONDS = 60;
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const MAGIC_LINK_CALLBACK_ROOT_URL = "https://asd-642.github.io/lailai-materials-management/";
@@ -56,6 +56,47 @@
   const PASSWORD_NESTED_RESPONSE_FIELDS = Object.freeze(new Set(["data", "error"]));
   const PASSWORD_NESTED_DATA_FIELDS = Object.freeze(new Set(["session", "user", "weakPassword"]));
   const WEAK_PASSWORD_REASONS = Object.freeze(new Set(["characters", "length", "pwned"]));
+  const PASSWORD_TELEMETRY_SCOPES = Object.freeze(["topLevel", "data", "session", "user"]);
+  const PASSWORD_TELEMETRY_FIELD_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+  const PASSWORD_TELEMETRY_MAX_FIELDS = 64;
+  const PASSWORD_TELEMETRY_CONTAINERS = Object.freeze(new Set(["flat", "nested", "other"]));
+  const PASSWORD_TELEMETRY_STAGES = Object.freeze(new Set([
+    "idle",
+    "json",
+    "container",
+    "fields",
+    "identity",
+    "metadata",
+    "session",
+    "accepted",
+  ]));
+  const PASSWORD_TELEMETRY_REASONS = Object.freeze(new Set([
+    "NOT_PRESENT",
+    "PENDING",
+    "HTTP_REJECTED",
+    "JSON_INVALID",
+    "DUPLICATE_KEY",
+    "CONTAINER_UNSUPPORTED",
+    "MIXED_CONTAINER",
+    "UNKNOWN_FIELDS",
+    "TOP_LEVEL_FIELDS_INVALID",
+    "DATA_FIELDS_INVALID",
+    "SESSION_FIELDS_INVALID",
+    "IDENTITY_CONFLICT",
+    "WEAK_PASSWORD_INVALID",
+    "SESSION_CORE_INVALID",
+    "ACCEPTED",
+  ]));
+  const PASSWORD_TELEMETRY_VALUE_TYPES = Object.freeze(new Set([
+    "string",
+    "number",
+    "boolean",
+    "object",
+    "array",
+    "null",
+    "missing",
+  ]));
+  const GLOBAL_AUTH_DIAGNOSTIC_NODE_ID = "materials-quote-supabase-auth-diagnostic";
   const AUTH_CODE_PATTERN = /^[A-Za-z0-9._~-]{20,2048}$/;
   const PKCE_VERIFIER_PATTERN = /^[A-Za-z0-9._~-]{43,128}$/;
   const CALLBACK_QUERY_FIELDS = Object.freeze(new Set(["code", "type"]));
@@ -117,6 +158,103 @@
     return isRecord(value)
       && Object.keys(value).every((key) => allowedFields.has(key))
       && requiredFields.every((key) => hasOwn(value, key));
+  }
+
+  function telemetryValueType(value) {
+    if (value === null) return "null";
+    if (Array.isArray(value)) return "array";
+    if (typeof value === "string") return "string";
+    if (typeof value === "number") return "number";
+    if (typeof value === "boolean") return "boolean";
+    if (typeof value === "object") return "object";
+    return "missing";
+  }
+
+  function describeTelemetryRecord(value) {
+    if (!isRecord(value)) return Object.freeze({ fields: Object.freeze([]), types: Object.freeze([]) });
+    const entries = Object.keys(value)
+      .slice(0, PASSWORD_TELEMETRY_MAX_FIELDS)
+      .map((rawName) => {
+        const name = PASSWORD_TELEMETRY_FIELD_NAME_PATTERN.test(rawName) ? rawName : "invalid_field_name";
+        return Object.freeze({ name, type: telemetryValueType(value[rawName]) });
+      })
+      .sort((left, right) => left.name.localeCompare(right.name));
+    if (Object.keys(value).length > PASSWORD_TELEMETRY_MAX_FIELDS) {
+      entries.push(Object.freeze({ name: "too_many_fields", type: "missing" }));
+    }
+    return Object.freeze({
+      fields: Object.freeze(Array.from(new Set(entries.map((entry) => entry.name))).sort()),
+      types: Object.freeze(Array.from(new Set(entries.map((entry) => `${entry.name}:${entry.type}`))).sort()),
+    });
+  }
+
+  function freezePasswordLoginTelemetry(value) {
+    const fields = {};
+    const types = {};
+    for (const scope of PASSWORD_TELEMETRY_SCOPES) {
+      fields[scope] = Object.freeze(Array.isArray(value?.fields?.[scope]) ? [...value.fields[scope]] : []);
+      types[scope] = Object.freeze(Array.isArray(value?.types?.[scope]) ? [...value.types[scope]] : []);
+    }
+    return Object.freeze({
+      container: PASSWORD_TELEMETRY_CONTAINERS.has(String(value?.container || "")) ? String(value.container) : "other",
+      fields: Object.freeze(fields),
+      types: Object.freeze(types),
+      stage: PASSWORD_TELEMETRY_STAGES.has(String(value?.stage || "")) ? String(value.stage) : "idle",
+      reason: PASSWORD_TELEMETRY_REASONS.has(String(value?.reason || "")) ? String(value.reason) : "NOT_PRESENT",
+      flags: Object.freeze({
+        duplicate: value?.flags?.duplicate === true,
+        mixed: value?.flags?.mixed === true,
+        conflict: value?.flags?.conflict === true,
+        unknown: value?.flags?.unknown === true,
+      }),
+      presence: Object.freeze({
+        data: value?.presence?.data === true,
+        session: value?.presence?.session === true,
+        user: value?.presence?.user === true,
+        error: value?.presence?.error === true,
+        weak_password: value?.presence?.weak_password === true,
+        weakPassword: value?.presence?.weakPassword === true,
+      }),
+    });
+  }
+
+  function emptyPasswordLoginTelemetry() {
+    return freezePasswordLoginTelemetry({
+      container: "other",
+      stage: "idle",
+      reason: "NOT_PRESENT",
+    });
+  }
+
+  function normalizePasswordLoginTelemetry(value) {
+    if (!isRecord(value)) return emptyPasswordLoginTelemetry();
+    const fields = {};
+    const types = {};
+    for (const scope of PASSWORD_TELEMETRY_SCOPES) {
+      const rawFields = Array.isArray(value?.fields?.[scope]) ? value.fields[scope] : [];
+      fields[scope] = Array.from(new Set(rawFields
+        .map(String)
+        .filter((name) => PASSWORD_TELEMETRY_FIELD_NAME_PATTERN.test(name))))
+        .slice(0, PASSWORD_TELEMETRY_MAX_FIELDS)
+        .sort();
+      const allowedFields = new Set(fields[scope]);
+      const rawTypes = Array.isArray(value?.types?.[scope]) ? value.types[scope] : [];
+      types[scope] = Array.from(new Set(rawTypes.map(String).filter((entry) => {
+        const separator = entry.lastIndexOf(":");
+        if (separator < 1) return false;
+        return allowedFields.has(entry.slice(0, separator))
+          && PASSWORD_TELEMETRY_VALUE_TYPES.has(entry.slice(separator + 1));
+      }))).slice(0, PASSWORD_TELEMETRY_MAX_FIELDS).sort();
+    }
+    return freezePasswordLoginTelemetry({
+      container: value.container,
+      fields,
+      types,
+      stage: value.stage,
+      reason: value.reason,
+      flags: value.flags,
+      presence: value.presence,
+    });
   }
 
   function emptyCallbackTelemetry() {
@@ -475,24 +613,123 @@
     return new Set(value.reasons.map(String)).size === value.reasons.length;
   }
 
-  function normalizePasswordLoginResponse(value, issuedAtSeconds) {
+  function inspectPasswordLoginResponse(value, parseDiagnostic = {}) {
+    const record = isRecord(value) ? value : null;
+    const hasData = Boolean(record && hasOwn(record, "data"));
+    const hasFlatSessionField = Boolean(record && PASSWORD_SESSION_REQUIRED_FIELDS.some((key) => hasOwn(record, key)));
+    const container = hasData ? "nested" : (hasFlatSessionField || hasOwn(record || {}, "weak_password") ? "flat" : "other");
+    const dataValue = hasData && isRecord(record.data) ? record.data : null;
+    const sessionValue = container === "nested"
+      ? (isRecord(dataValue?.session) ? dataValue.session : null)
+      : (container === "flat" ? record : null);
+    const sessionUser = isRecord(sessionValue?.user) ? sessionValue.user : null;
+    const dataUser = isRecord(dataValue?.user) ? dataValue.user : null;
+    const userValue = sessionUser || dataUser;
+    const described = {
+      topLevel: describeTelemetryRecord(record),
+      data: describeTelemetryRecord(dataValue),
+      session: describeTelemetryRecord(sessionValue),
+      user: describeTelemetryRecord(userValue),
+    };
+    const fields = {};
+    const types = {};
+    for (const scope of PASSWORD_TELEMETRY_SCOPES) {
+      fields[scope] = described[scope].fields;
+      types[scope] = described[scope].types;
+    }
+    const topAllowed = container === "nested" ? PASSWORD_NESTED_RESPONSE_FIELDS : PASSWORD_FLAT_RESPONSE_FIELDS;
+    const topUnknown = Boolean(record && Object.keys(record).some((key) => !topAllowed.has(key)));
+    const dataUnknown = Boolean(dataValue && Object.keys(dataValue).some((key) => !PASSWORD_NESTED_DATA_FIELDS.has(key)));
+    const sessionUnknown = Boolean(sessionValue && Object.keys(sessionValue).some((key) => !PASSWORD_SESSION_FIELDS.has(key)
+      && !(container === "flat" && key === "weak_password")));
+    const mixed = Boolean(hasData && (
+      PASSWORD_SESSION_REQUIRED_FIELDS.some((key) => hasOwn(record, key))
+      || hasOwn(record, "expires_at")
+      || hasOwn(record, "weak_password")
+    ));
+    const conflict = Boolean(container === "nested"
+      && sessionUser
+      && dataUser
+      && (String(sessionUser.id || "") !== String(dataUser.id || "")
+        || String(sessionUser.email || "") !== String(dataUser.email || "")));
+    return freezePasswordLoginTelemetry({
+      container,
+      fields,
+      types,
+      stage: parseDiagnostic.duplicate === true || parseDiagnostic.invalid === true ? "json" : "container",
+      reason: parseDiagnostic.duplicate === true
+        ? "DUPLICATE_KEY"
+        : (parseDiagnostic.invalid === true ? "JSON_INVALID" : "PENDING"),
+      flags: {
+        duplicate: parseDiagnostic.duplicate === true,
+        mixed,
+        conflict,
+        unknown: topUnknown || dataUnknown || sessionUnknown || container === "other",
+      },
+      presence: {
+        data: hasData,
+        session: Boolean(dataValue && hasOwn(dataValue, "session")),
+        user: Boolean((sessionValue && hasOwn(sessionValue, "user")) || (dataValue && hasOwn(dataValue, "user"))),
+        error: Boolean(record && hasOwn(record, "error")),
+        weak_password: Boolean(record && hasOwn(record, "weak_password")),
+        weakPassword: Boolean(dataValue && hasOwn(dataValue, "weakPassword")),
+      },
+    });
+  }
+
+  function finishPasswordLoginTelemetry(telemetry, stage, reason) {
+    return freezePasswordLoginTelemetry({
+      ...telemetry,
+      stage,
+      reason,
+    });
+  }
+
+  function normalizePasswordLoginResponse(value, issuedAtSeconds, parseDiagnostic = {}) {
+    let telemetry = inspectPasswordLoginResponse(value, parseDiagnostic);
+    if (telemetry.flags.duplicate) {
+      return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "json", "DUPLICATE_KEY") });
+    }
+    if (parseDiagnostic.invalid === true || !isRecord(value)) {
+      return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "json", "JSON_INVALID") });
+    }
+    if (telemetry.flags.mixed) {
+      return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "container", "MIXED_CONTAINER") });
+    }
+    if (telemetry.container === "other") {
+      return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "container", "CONTAINER_UNSUPPORTED") });
+    }
+    if (telemetry.flags.unknown) {
+      return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "fields", "UNKNOWN_FIELDS") });
+    }
     let sessionSource = null;
     if (hasExactFields(value, PASSWORD_FLAT_RESPONSE_FIELDS, PASSWORD_SESSION_REQUIRED_FIELDS)) {
-      if (hasOwn(value, "weak_password") && !validWeakPasswordMetadata(value.weak_password)) return null;
+      if (hasOwn(value, "weak_password") && !validWeakPasswordMetadata(value.weak_password)) {
+        return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "metadata", "WEAK_PASSWORD_INVALID") });
+      }
       sessionSource = value;
-    } else if (hasExactFields(value, PASSWORD_NESTED_RESPONSE_FIELDS, ["data", "error"])
-      && value.error === null
-      && hasExactFields(value.data, PASSWORD_NESTED_DATA_FIELDS, ["session", "user"])) {
+    } else if (telemetry.container === "nested") {
+      if (!hasExactFields(value, PASSWORD_NESTED_RESPONSE_FIELDS, ["data", "error"]) || value.error !== null) {
+        return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "fields", "TOP_LEVEL_FIELDS_INVALID") });
+      }
+      if (!hasExactFields(value.data, PASSWORD_NESTED_DATA_FIELDS, ["session", "user"])) {
+        return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "fields", "DATA_FIELDS_INVALID") });
+      }
       const nestedSession = value.data.session;
       const nestedUser = value.data.user;
       if (!hasExactFields(nestedSession, PASSWORD_SESSION_FIELDS, PASSWORD_SESSION_REQUIRED_FIELDS)
-        || !isRecord(nestedUser)
-        || String(nestedSession.user?.id || "") !== String(nestedUser.id || "")
-        || String(nestedSession.user?.email || "") !== String(nestedUser.email || "")
-        || (hasOwn(value.data, "weakPassword") && !validWeakPasswordMetadata(value.data.weakPassword))) {
-        return null;
+        || !isRecord(nestedUser)) {
+        return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "fields", "SESSION_FIELDS_INVALID") });
+      }
+      if (telemetry.flags.conflict) {
+        return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "identity", "IDENTITY_CONFLICT") });
+      }
+      if (hasOwn(value.data, "weakPassword") && !validWeakPasswordMetadata(value.data.weakPassword)) {
+        return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "metadata", "WEAK_PASSWORD_INVALID") });
       }
       sessionSource = nestedSession;
+    } else {
+      return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "fields", "SESSION_FIELDS_INVALID") });
     }
     if (!sessionSource
       || !Number.isSafeInteger(Number(sessionSource.expires_in))
@@ -500,9 +737,13 @@
       || Number(sessionSource.expires_in) > 86400
       || String(sessionSource.token_type || "").toLowerCase() !== "bearer"
       || !EMAIL_PATTERN.test(String(sessionSource.user?.email || ""))) {
-      return null;
+      return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "session", "SESSION_CORE_INVALID") });
     }
-    return normalizeSession(sessionSource, issuedAtSeconds);
+    const sessionValue = normalizeSession(sessionSource, issuedAtSeconds);
+    return Object.freeze({
+      session: sessionValue,
+      telemetry: finishPasswordLoginTelemetry(telemetry, sessionValue ? "accepted" : "session", sessionValue ? "ACCEPTED" : "SESSION_CORE_INVALID"),
+    });
   }
 
   function safeSession(session) {
@@ -513,8 +754,11 @@
     });
   }
 
-  function parseJsonWithUniqueObjectKeys(raw) {
-    if (typeof raw !== "string" || raw.length === 0 || raw.length > AUTH_RESPONSE_MAX_LENGTH) return null;
+  function parseJsonWithUniqueObjectKeys(raw, diagnostic = null) {
+    if (typeof raw !== "string" || raw.length === 0 || raw.length > AUTH_RESPONSE_MAX_LENGTH) {
+      if (diagnostic) diagnostic.invalid = true;
+      return null;
+    }
     let index = 0;
 
     function skipWhitespace() {
@@ -553,7 +797,10 @@
         }
         while (index < raw.length) {
           const key = scanString();
-          if (keys.has(key)) throw new Error("JSON_DUPLICATE_KEY");
+          if (keys.has(key)) {
+            if (diagnostic) diagnostic.duplicate = true;
+            throw new Error("JSON_DUPLICATE_KEY");
+          }
           keys.add(key);
           skipWhitespace();
           if (raw[index] !== ":") throw new Error("JSON_COLON_REQUIRED");
@@ -605,18 +852,20 @@
       if (index !== raw.length) return null;
       return JSON.parse(raw);
     } catch (error) {
+      if (diagnostic) diagnostic.invalid = true;
       return null;
     }
   }
 
-  async function responseJson(response) {
+  async function responseJson(response, diagnostic = null) {
     if (!response || typeof response !== "object") return null;
     try {
       if (typeof response.text === "function") {
-        return parseJsonWithUniqueObjectKeys(await response.text());
+        return parseJsonWithUniqueObjectKeys(await response.text(), diagnostic);
       }
       return await response.json();
     } catch (error) {
+      if (diagnostic) diagnostic.invalid = true;
       return null;
     }
   }
@@ -639,6 +888,7 @@
     let refreshing = null;
     let callbackConsumed = false;
     let lastSessionReadStatus = "missing";
+    let lastPasswordLoginTelemetry = emptyPasswordLoginTelemetry();
 
     function emit(event) {
       const snapshot = safeSession(currentSession);
@@ -710,10 +960,11 @@
         user: snapshot?.user || null,
         expiresAt: snapshot?.expiresAt || null,
         sessionStorageKey: sessionKey,
+        passwordLoginTelemetry: lastPasswordLoginTelemetry,
       });
     }
 
-    async function post(path, body, accessToken) {
+    async function post(path, body, accessToken, responseDiagnostic = null) {
       if (!request || !projectUrl || !publishableKey) return errorResult("SUPABASE_AUTH_CONFIGURATION_INVALID");
       const headers = {
         apikey: publishableKey,
@@ -730,7 +981,7 @@
           redirect: "error",
           referrerPolicy: "no-referrer",
         });
-        const value = await responseJson(response);
+        const value = await responseJson(response, responseDiagnostic);
         return { ok: response.ok === true, status: Number(response.status), value };
       } catch (error) {
         return errorResult("SUPABASE_AUTH_NETWORK_ERROR");
@@ -917,18 +1168,25 @@
     }
 
     async function signInWithPassword(email, password) {
+      lastPasswordLoginTelemetry = emptyPasswordLoginTelemetry();
       const normalizedEmail = String(email || "").trim().toLowerCase();
       const suppliedPassword = String(password || "");
       if (!EMAIL_PATTERN.test(normalizedEmail) || suppliedPassword.length < 8) {
         return errorResult("SUPABASE_AUTH_CREDENTIAL_INPUT_INVALID");
       }
+      const parseDiagnostic = { duplicate: false, invalid: false };
       const response = await post("/auth/v1/token?grant_type=password", {
         email: normalizedEmail,
         password: suppliedPassword,
-      });
-      const signedInSession = response.ok
-        ? normalizePasswordLoginResponse(response.value, Math.floor(Number(nowMs()) / 1000))
-        : null;
+      }, undefined, parseDiagnostic);
+      const normalized = response.ok
+        ? normalizePasswordLoginResponse(response.value, Math.floor(Number(nowMs()) / 1000), parseDiagnostic)
+        : Object.freeze({
+            session: null,
+            telemetry: finishPasswordLoginTelemetry(emptyPasswordLoginTelemetry(), "container", "HTTP_REJECTED"),
+          });
+      lastPasswordLoginTelemetry = normalized.telemetry;
+      const signedInSession = normalized.session;
       if (!signedInSession) {
         clearStoredSession();
         emit("SIGNED_OUT");
@@ -1053,12 +1311,19 @@
       verifyOwnerMembership: unavailable,
       bootstrapFirstOwner: unavailable,
       onAuthStateChange: () => Object.freeze({ unsubscribe() {} }),
-      status: () => Object.freeze({ configured: false, signedIn: false, user: null, expiresAt: null, sessionStorageKey: "" }),
+      status: () => Object.freeze({
+        configured: false,
+        signedIn: false,
+        user: null,
+        expiresAt: null,
+        sessionStorageKey: "",
+        passwordLoginTelemetry: emptyPasswordLoginTelemetry(),
+      }),
       sessionStorageKey: "",
     });
   }
 
-  function createRuntimeAuthIntegration({ config, authProvider, configApi, fetchImpl, eventTarget, callbackDiagnosticStorage, callbackTelemetryPublisher, initialCallbackTelemetry } = {}) {
+  function createRuntimeAuthIntegration({ config, authProvider, configApi, fetchImpl, eventTarget, callbackDiagnosticStorage, callbackTelemetryPublisher, passwordLoginTelemetryPublisher, initialCallbackTelemetry } = {}) {
     const provider = authProvider || createUnavailableProvider("SUPABASE_PUBLIC_CONFIG_REQUIRED");
     const publicConfig = config && typeof config === "object" ? config : null;
     const target = eventTarget || null;
@@ -1072,6 +1337,7 @@
     let callbackTelemetry = initialCallbackTelemetry
       ? normalizeCallbackTelemetry(initialCallbackTelemetry)
       : emptyCallbackTelemetry();
+    let passwordLoginTelemetry = emptyPasswordLoginTelemetry();
     let lastPushResult = null;
     let authTransitionRevision = 0;
     let initializeRevision = 0;
@@ -1119,6 +1385,7 @@
         loginStage,
         callbackStage,
         callbackTelemetry,
+        passwordLoginTelemetry,
         lastPushOk: lastPushResult?.ok === true,
       });
     }
@@ -1130,6 +1397,13 @@
       if (typeof callbackTelemetryPublisher === "function") {
         try {
           callbackTelemetryPublisher(status.callbackTelemetry, status);
+        } catch (error) {
+          // Diagnostic rendering cannot alter Auth or authorization state.
+        }
+      }
+      if (typeof passwordLoginTelemetryPublisher === "function") {
+        try {
+          passwordLoginTelemetryPublisher(status.passwordLoginTelemetry, status);
         } catch (error) {
           // Diagnostic rendering cannot alter Auth or authorization state.
         }
@@ -1186,6 +1460,7 @@
       callbackDiagnostics.clear();
       callbackStage = "";
       callbackTelemetry = emptyCallbackTelemetry();
+      passwordLoginTelemetry = emptyPasswordLoginTelemetry();
       authorizationPhase = "idle";
       ownerVerified = false;
       if (ownerBootstrapPhase !== "consumed") ownerBootstrapPhase = "idle";
@@ -1193,6 +1468,7 @@
       loginStage = "request-pending";
       publish();
       const signedIn = await provider.signInWithPassword(email, password);
+      passwordLoginTelemetry = normalizePasswordLoginTelemetry(provider.status().passwordLoginTelemetry);
       if (!signedIn.ok) {
         lastCode = signedIn.code;
         loginStage = signedIn.code === "SUPABASE_AUTH_LOGIN_RESPONSE_INVALID"
@@ -1214,6 +1490,7 @@
       callbackDiagnostics.clear();
       callbackStage = "";
       loginStage = "idle";
+      passwordLoginTelemetry = emptyPasswordLoginTelemetry();
       lastCode = "SUPABASE_AUTH_SIGNED_OUT";
       authorizationPhase = "idle";
       ownerVerified = false;
@@ -1349,6 +1626,45 @@
     });
   }
 
+  function ensureGlobalAuthDiagnosticNode(browserRoot) {
+    const document = browserRoot?.document;
+    if (!document || typeof document.getElementById !== "function") return null;
+    let node = document.getElementById(GLOBAL_AUTH_DIAGNOSTIC_NODE_ID);
+    if (node) return node;
+    if (typeof document.createElement !== "function") return null;
+    node = document.createElement("meta");
+    node.id = GLOBAL_AUTH_DIAGNOSTIC_NODE_ID;
+    node.hidden = true;
+    node.setAttribute("data-supabase-auth-global-diagnostic", "");
+    const parent = document.head || document.documentElement;
+    if (!parent || typeof parent.appendChild !== "function") return null;
+    parent.appendChild(node);
+    return node;
+  }
+
+  function writeGlobalPasswordLoginTelemetry(browserRoot, telemetry) {
+    const node = ensureGlobalAuthDiagnosticNode(browserRoot);
+    if (!node || typeof node.setAttribute !== "function") return false;
+    const safe = normalizePasswordLoginTelemetry(telemetry);
+    const list = (group, scope) => safe[group][scope].join(",");
+    const boolean = (value) => value === true ? "1" : "0";
+    node.setAttribute("data-supabase-auth-password-response-container", safe.container);
+    node.setAttribute("data-supabase-auth-password-response-stage", safe.stage);
+    node.setAttribute("data-supabase-auth-password-response-reason", safe.reason);
+    for (const scope of PASSWORD_TELEMETRY_SCOPES) {
+      const attributeScope = scope === "topLevel" ? "top" : scope;
+      node.setAttribute(`data-supabase-auth-password-response-${attributeScope}-fields`, list("fields", scope));
+      node.setAttribute(`data-supabase-auth-password-response-${attributeScope}-types`, list("types", scope));
+    }
+    for (const name of ["duplicate", "mixed", "conflict", "unknown"]) {
+      node.setAttribute(`data-supabase-auth-password-response-${name}`, boolean(safe.flags[name]));
+    }
+    for (const name of ["data", "session", "user", "error", "weak_password", "weakPassword"]) {
+      node.setAttribute(`data-supabase-auth-password-response-has-${name.replace(/_/g, "-")}`, boolean(safe.presence[name]));
+    }
+    return true;
+  }
+
   function bootstrapBrowserRuntime(browserRoot = root) {
     if (!browserRoot || browserRoot.MaterialsQuoteSupabaseRuntime) return browserRoot?.MaterialsQuoteSupabaseRuntime || null;
     const configApi = browserRoot.MaterialsQuoteSupabaseRuntimeConfig;
@@ -1384,6 +1700,9 @@
           bridge.writeGlobalTelemetry(browserRoot, telemetry, status?.signedIn === true ? "signed-in" : "signed-out");
         }
       },
+      passwordLoginTelemetryPublisher: (telemetry) => {
+        writeGlobalPasswordLoginTelemetry(browserRoot, telemetry);
+      },
     });
     browserRoot.MaterialsQuoteSupabaseRuntime = integration;
     browserRoot.MaterialsQuoteSupabaseSyncConfig = integration.getSyncConfiguration();
@@ -1417,6 +1736,8 @@
     MAGIC_LINK_CALLBACK_URLS,
     CALLBACK_DIAGNOSTIC_STORAGE_KEY,
     CALLBACK_DIAGNOSTIC_STATUSES,
+    emptyPasswordLoginTelemetry,
+    writeGlobalPasswordLoginTelemetry,
     parseMagicLinkCallback,
     validateMagicLinkAccessToken,
     createSupabaseAuthProvider,
