@@ -7,7 +7,7 @@
   "use strict";
 
   const FORMAL_PUSH_CONFIRMATION = "啟用唯一正式推送";
-  const AUTH_RUNTIME_VERSION = "20260813-recovery-global-telemetry-001";
+  const AUTH_RUNTIME_VERSION = "20260813-password-login-session-race-001";
   const SESSION_REFRESH_MARGIN_SECONDS = 60;
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const MAGIC_LINK_CALLBACK_ROOT_URL = "https://asd-642.github.io/lailai-materials-management/";
@@ -457,6 +457,7 @@
     const pkceVerifierKey = sessionKey ? `${sessionKey}-code-verifier` : "";
     const listeners = new Set();
     let currentSession = null;
+    let sessionRevision = 0;
     let refreshing = null;
     let callbackConsumed = false;
     let lastSessionReadStatus = "missing";
@@ -470,6 +471,12 @@
           // Subscriber failures must not change Auth or sync state.
         }
       }
+    }
+
+    function replaceCurrentSession(sessionValue) {
+      currentSession = sessionValue || null;
+      sessionRevision += 1;
+      return currentSession;
     }
 
     function readStoredSession() {
@@ -503,7 +510,7 @@
     }
 
     function clearStoredSession() {
-      currentSession = null;
+      replaceCurrentSession(null);
       if (!sessionStorage || !sessionKey) return;
       try {
         sessionStorage.removeItem(sessionKey);
@@ -610,7 +617,7 @@
       if (!sessionValue || !writeStoredSession(sessionValue)) {
         return errorResult("SUPABASE_AUTH_SESSION_STORAGE_FAILED");
       }
-      currentSession = sessionValue;
+      replaceCurrentSession(sessionValue);
       emit("SIGNED_IN");
       return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
     }
@@ -656,7 +663,7 @@
         return errorResult("SUPABASE_AUTH_CALLBACK_USER_INVALID");
       }
       if (!writeStoredSession(sessionValue)) return errorResult("SUPABASE_AUTH_SESSION_STORAGE_FAILED");
-      currentSession = sessionValue;
+      replaceCurrentSession(sessionValue);
       emit("SIGNED_IN");
       return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
     }
@@ -687,10 +694,16 @@
         emit("SIGNED_OUT");
         return errorResult("SUPABASE_AUTH_SESSION_EXPIRED");
       }
+      const refreshRevision = sessionRevision;
       refreshing = (async () => {
         const response = await post("/auth/v1/token?grant_type=refresh_token", {
           refresh_token: source.refresh_token,
         });
+        if (sessionRevision !== refreshRevision) {
+          return currentSession
+            ? Object.freeze({ ok: true, code: "", session: safeSession(currentSession), superseded: true })
+            : errorResult("SUPABASE_AUTH_SESSION_SUPERSEDED");
+        }
         const renewed = response.ok
           ? normalizeSession(response.value, Math.floor(Number(nowMs()) / 1000))
           : null;
@@ -699,7 +712,7 @@
           emit("SIGNED_OUT");
           return errorResult("SUPABASE_AUTH_SESSION_EXPIRED");
         }
-        currentSession = renewed;
+        replaceCurrentSession(renewed);
         emit("TOKEN_REFRESHED");
         return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
       })();
@@ -719,7 +732,7 @@
           ? "SUPABASE_AUTH_SESSION_STORAGE_FAILED"
           : "SUPABASE_AUTH_SIGNED_OUT");
       }
-      currentSession = stored;
+      replaceCurrentSession(stored);
       if (!sessionIsFresh(currentSession)) return refreshSession();
       emit("INITIAL_SESSION");
       return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
@@ -750,13 +763,13 @@
         emit("SIGNED_OUT");
         return errorResult("SUPABASE_AUTH_SESSION_STORAGE_FAILED");
       }
-      currentSession = signedInSession;
+      replaceCurrentSession(signedInSession);
       emit("SIGNED_IN");
       return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
     }
 
     async function getAccessToken() {
-      if (!currentSession) currentSession = readStoredSession();
+      if (!currentSession) replaceCurrentSession(readStoredSession());
       if (!currentSession) return "";
       if (!sessionIsFresh(currentSession)) {
         const refreshed = await refreshSession();
@@ -811,7 +824,7 @@
     }
 
     async function signOut() {
-      if (!currentSession) currentSession = readStoredSession();
+      if (!currentSession) replaceCurrentSession(readStoredSession());
       const accessToken = currentSession?.access_token || "";
       let remoteOk = true;
       if (accessToken) {
@@ -882,6 +895,8 @@
       ? normalizeCallbackTelemetry(initialCallbackTelemetry)
       : emptyCallbackTelemetry();
     let lastPushResult = null;
+    let authTransitionRevision = 0;
+    let initializeRevision = 0;
 
     function syncConfiguration(enabled = authorizationPhase === "authorized" || authorizationPhase === "in-flight") {
       if (!publicConfig) {
@@ -952,6 +967,8 @@
     }
 
     async function initialize(callbackSource = null) {
+      const transitionAtStart = authTransitionRevision;
+      const currentInitializeRevision = ++initializeRevision;
       const hadCallback = Boolean(callbackSource);
       callbackTelemetry = hadCallback
         ? normalizeCallbackTelemetry(callbackSource?.telemetry)
@@ -959,6 +976,9 @@
       const restored = callbackSource
         ? await provider.establishMagicLinkSession(callbackSource)
         : await provider.restoreSession();
+      if (transitionAtStart !== authTransitionRevision || currentInitializeRevision !== initializeRevision) {
+        return restored;
+      }
       ownerVerified = false;
       authorizationPhase = "idle";
       if (hadCallback) {
@@ -984,6 +1004,7 @@
     }
 
     async function signInWithPassword(email, password) {
+      authTransitionRevision += 1;
       callbackDiagnostics.clear();
       callbackStage = "";
       callbackTelemetry = emptyCallbackTelemetry();
@@ -1011,6 +1032,7 @@
     }
 
     async function signOut() {
+      authTransitionRevision += 1;
       callbackDiagnostics.clear();
       callbackStage = "";
       loginStage = "idle";
