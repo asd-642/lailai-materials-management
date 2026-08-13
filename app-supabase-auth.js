@@ -7,7 +7,7 @@
   "use strict";
 
   const FORMAL_PUSH_CONFIRMATION = "啟用唯一正式推送";
-  const AUTH_RUNTIME_VERSION = "20260813-recovery-callback-shape-telemetry-001";
+  const AUTH_RUNTIME_VERSION = "20260813-recovery-global-telemetry-001";
   const SESSION_REFRESH_MARGIN_SECONDS = 60;
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const MAGIC_LINK_CALLBACK_ROOT_URL = "https://asd-642.github.io/lailai-materials-management/";
@@ -867,7 +867,7 @@
     });
   }
 
-  function createRuntimeAuthIntegration({ config, authProvider, configApi, fetchImpl, eventTarget, callbackDiagnosticStorage } = {}) {
+  function createRuntimeAuthIntegration({ config, authProvider, configApi, fetchImpl, eventTarget, callbackDiagnosticStorage, callbackTelemetryPublisher, initialCallbackTelemetry } = {}) {
     const provider = authProvider || createUnavailableProvider("SUPABASE_PUBLIC_CONFIG_REQUIRED");
     const publicConfig = config && typeof config === "object" ? config : null;
     const target = eventTarget || null;
@@ -878,7 +878,9 @@
     let lastCode = publicConfig ? "SUPABASE_AUTH_SIGNED_OUT" : "SUPABASE_PUBLIC_CONFIG_REQUIRED";
     let loginStage = "idle";
     let callbackStage = "";
-    let callbackTelemetry = emptyCallbackTelemetry();
+    let callbackTelemetry = initialCallbackTelemetry
+      ? normalizeCallbackTelemetry(initialCallbackTelemetry)
+      : emptyCallbackTelemetry();
     let lastPushResult = null;
 
     function syncConfiguration(enabled = authorizationPhase === "authorized" || authorizationPhase === "in-flight") {
@@ -932,6 +934,13 @@
       const facade = syncConfiguration();
       if (configApi && typeof configApi.publishSyncFacade === "function") configApi.publishSyncFacade(facade);
       const status = publicStatus();
+      if (typeof callbackTelemetryPublisher === "function") {
+        try {
+          callbackTelemetryPublisher(status.callbackTelemetry, status);
+        } catch (error) {
+          // Diagnostic rendering cannot alter Auth or authorization state.
+        }
+      }
       if (target && typeof target.dispatchEvent === "function" && typeof root?.CustomEvent === "function") {
         try {
           target.dispatchEvent(new root.CustomEvent("materials-quote-supabase-auth-change", { detail: status }));
@@ -1157,6 +1166,7 @@
     } catch (error) {
       callbackDiagnosticStorage = null;
     }
+    let callbackSource = browserRoot.MaterialsQuoteSupabaseAuthCallback || null;
     const provider = config
       ? createSupabaseAuthProvider({ config, fetchImpl, storage: browserStorage })
       : createUnavailableProvider(configApi?.status?.().code || "SUPABASE_PUBLIC_CONFIG_REQUIRED");
@@ -1167,10 +1177,16 @@
       fetchImpl,
       eventTarget: browserRoot,
       callbackDiagnosticStorage,
+      initialCallbackTelemetry: callbackSource?.telemetry || null,
+      callbackTelemetryPublisher: (telemetry, status) => {
+        const bridge = browserRoot.MaterialsQuoteSupabaseAuthCallbackBridge;
+        if (bridge && typeof bridge.writeGlobalTelemetry === "function") {
+          bridge.writeGlobalTelemetry(browserRoot, telemetry, status?.signedIn === true ? "signed-in" : "signed-out");
+        }
+      },
     });
     browserRoot.MaterialsQuoteSupabaseRuntime = integration;
     browserRoot.MaterialsQuoteSupabaseSyncConfig = integration.getSyncConfiguration();
-    let callbackSource = browserRoot.MaterialsQuoteSupabaseAuthCallback || null;
     try {
       delete browserRoot.MaterialsQuoteSupabaseAuthCallback;
     } catch (error) {
