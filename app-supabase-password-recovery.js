@@ -6,7 +6,7 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function (root) {
   "use strict";
 
-  const RECOVERY_RUNTIME_VERSION = "20260812-project-rename-phase-a-001";
+  const RECOVERY_RUNTIME_VERSION = "20260813-server-validated-recovery-session-001";
   const FORMAL_SITE_BASE_URL = "https://asd-642.github.io/lailai-materials-management/";
   const PASSWORD_RECOVERY_REDIRECT_URL = `${FORMAL_SITE_BASE_URL}supabase-password-recovery.html`;
   const PASSWORD_RECOVERY_SUCCESS_URL = `${FORMAL_SITE_BASE_URL}index.html#/login`;
@@ -346,6 +346,30 @@
       return true;
     }
 
+    async function acceptServerValidatedSession(source) {
+      if (!isRecord(source)) return false;
+      const token = String(source.access_token || "");
+      const refreshToken = String(source.refresh_token || "");
+      if (token.length < 32
+        || token.length > TOKEN_MAX_LENGTH
+        || refreshToken.length < 20
+        || refreshToken.length > TOKEN_MAX_LENGTH
+        || /[\u0000-\u001F\u007F]/.test(token)
+        || /[\u0000-\u001F\u007F]/.test(refreshToken)) {
+        return false;
+      }
+      if (acceptSession(source)) return true;
+
+      const userProbe = await authRequest("/auth/v1/user", "GET", undefined, token);
+      if (!userProbe.ok
+        || !isRecord(userProbe.value)
+        || !UUID_PATTERN.test(String(userProbe.value.id || ""))) {
+        return false;
+      }
+      accessToken = token;
+      return true;
+    }
+
     async function establishRecovery(callbackSource) {
       if (!configured) return resultError(lastCode);
       if (phase !== "idle") return resultError("SUPABASE_RECOVERY_ALREADY_CONSUMED");
@@ -362,7 +386,7 @@
           access_token: parsed.accessToken,
           refresh_token: parsed.refreshToken,
         };
-        if (!acceptSession(session)) {
+        if (!await acceptServerValidatedSession(session)) {
           phase = "invalid";
           lastCode = "SUPABASE_RECOVERY_SESSION_INVALID";
           clearSensitive();
@@ -374,7 +398,7 @@
           type: "recovery",
           token_hash: tokenHash,
         });
-        if (!verified.ok || !acceptSession(verified.value)) {
+        if (!verified.ok || !await acceptServerValidatedSession(verified.value)) {
           phase = [400, 401, 403, 410, 422].includes(verified.status) ? "expired" : "invalid";
           lastCode = phase === "expired" ? "SUPABASE_RECOVERY_EXPIRED" : "SUPABASE_RECOVERY_VERIFY_FAILED";
           clearSensitive();
