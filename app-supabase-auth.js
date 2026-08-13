@@ -7,7 +7,7 @@
   "use strict";
 
   const FORMAL_PUSH_CONFIRMATION = "啟用唯一正式推送";
-  const AUTH_RUNTIME_VERSION = "20260813-password-login-session-race-001";
+  const AUTH_RUNTIME_VERSION = "20260813-password-login-response-shape-001";
   const SESSION_REFRESH_MARGIN_SECONDS = 60;
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const MAGIC_LINK_CALLBACK_ROOT_URL = "https://asd-642.github.io/lailai-materials-management/";
@@ -37,6 +37,25 @@
   const TOKEN_MAX_LENGTH = 8192;
   const PROJECT_REF_PATTERN = /^[a-z0-9]{20}$/;
   const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const AUTH_RESPONSE_MAX_LENGTH = 1048576;
+  const PASSWORD_SESSION_REQUIRED_FIELDS = Object.freeze([
+    "access_token",
+    "expires_in",
+    "refresh_token",
+    "token_type",
+    "user",
+  ]);
+  const PASSWORD_SESSION_FIELDS = Object.freeze(new Set([
+    ...PASSWORD_SESSION_REQUIRED_FIELDS,
+    "expires_at",
+  ]));
+  const PASSWORD_FLAT_RESPONSE_FIELDS = Object.freeze(new Set([
+    ...PASSWORD_SESSION_FIELDS,
+    "weak_password",
+  ]));
+  const PASSWORD_NESTED_RESPONSE_FIELDS = Object.freeze(new Set(["data", "error"]));
+  const PASSWORD_NESTED_DATA_FIELDS = Object.freeze(new Set(["session", "user", "weakPassword"]));
+  const WEAK_PASSWORD_REASONS = Object.freeze(new Set(["characters", "length", "pwned"]));
   const AUTH_CODE_PATTERN = /^[A-Za-z0-9._~-]{20,2048}$/;
   const PKCE_VERIFIER_PATTERN = /^[A-Za-z0-9._~-]{43,128}$/;
   const CALLBACK_QUERY_FIELDS = Object.freeze(new Set(["code", "type"]));
@@ -92,6 +111,12 @@
 
   function hasOwn(value, key) {
     return Object.prototype.hasOwnProperty.call(value, key);
+  }
+
+  function hasExactFields(value, allowedFields, requiredFields) {
+    return isRecord(value)
+      && Object.keys(value).every((key) => allowedFields.has(key))
+      && requiredFields.every((key) => hasOwn(value, key));
   }
 
   function emptyCallbackTelemetry() {
@@ -410,7 +435,18 @@
           : Number.NaN);
     const user = source.user && typeof source.user === "object" ? source.user : null;
     const userId = String(user?.id || "");
-    if (accessToken.length < 32 || refreshToken.length < 20 || !Number.isFinite(expiresAt) || expiresAt <= 0 || !userId) {
+    const tokenType = String(source.token_type || "").toLowerCase();
+    if (accessToken.length < 32
+      || accessToken.length > TOKEN_MAX_LENGTH
+      || refreshToken.length < 20
+      || refreshToken.length > TOKEN_MAX_LENGTH
+      || tokenType !== "bearer"
+      || !Number.isSafeInteger(expiresIn)
+      || expiresIn < 0
+      || expiresIn > 86400
+      || !Number.isSafeInteger(expiresAt)
+      || expiresAt <= 0
+      || !UUID_PATTERN.test(userId)) {
       return null;
     }
     return Object.freeze({
@@ -418,12 +454,55 @@
       refresh_token: refreshToken,
       expires_at: Math.floor(expiresAt),
       expires_in: Number.isFinite(expiresIn) ? expiresIn : 0,
-      token_type: String(source.token_type || "bearer"),
+      token_type: "bearer",
       user: Object.freeze({
         id: userId,
         email: String(user.email || ""),
       }),
     });
+  }
+
+  function validWeakPasswordMetadata(value) {
+    if (value === null) return true;
+    if (!hasExactFields(value, new Set(["message", "reasons"]), ["message", "reasons"])
+      || typeof value.message !== "string"
+      || value.message.length > 2048
+      || !Array.isArray(value.reasons)
+      || value.reasons.length > WEAK_PASSWORD_REASONS.size
+      || !value.reasons.every((reason) => WEAK_PASSWORD_REASONS.has(String(reason)))) {
+      return false;
+    }
+    return new Set(value.reasons.map(String)).size === value.reasons.length;
+  }
+
+  function normalizePasswordLoginResponse(value, issuedAtSeconds) {
+    let sessionSource = null;
+    if (hasExactFields(value, PASSWORD_FLAT_RESPONSE_FIELDS, PASSWORD_SESSION_REQUIRED_FIELDS)) {
+      if (hasOwn(value, "weak_password") && !validWeakPasswordMetadata(value.weak_password)) return null;
+      sessionSource = value;
+    } else if (hasExactFields(value, PASSWORD_NESTED_RESPONSE_FIELDS, ["data", "error"])
+      && value.error === null
+      && hasExactFields(value.data, PASSWORD_NESTED_DATA_FIELDS, ["session", "user"])) {
+      const nestedSession = value.data.session;
+      const nestedUser = value.data.user;
+      if (!hasExactFields(nestedSession, PASSWORD_SESSION_FIELDS, PASSWORD_SESSION_REQUIRED_FIELDS)
+        || !isRecord(nestedUser)
+        || String(nestedSession.user?.id || "") !== String(nestedUser.id || "")
+        || String(nestedSession.user?.email || "") !== String(nestedUser.email || "")
+        || (hasOwn(value.data, "weakPassword") && !validWeakPasswordMetadata(value.data.weakPassword))) {
+        return null;
+      }
+      sessionSource = nestedSession;
+    }
+    if (!sessionSource
+      || !Number.isSafeInteger(Number(sessionSource.expires_in))
+      || Number(sessionSource.expires_in) <= 0
+      || Number(sessionSource.expires_in) > 86400
+      || String(sessionSource.token_type || "").toLowerCase() !== "bearer"
+      || !EMAIL_PATTERN.test(String(sessionSource.user?.email || ""))) {
+      return null;
+    }
+    return normalizeSession(sessionSource, issuedAtSeconds);
   }
 
   function safeSession(session) {
@@ -434,9 +513,108 @@
     });
   }
 
+  function parseJsonWithUniqueObjectKeys(raw) {
+    if (typeof raw !== "string" || raw.length === 0 || raw.length > AUTH_RESPONSE_MAX_LENGTH) return null;
+    let index = 0;
+
+    function skipWhitespace() {
+      while (index < raw.length && /\s/.test(raw[index])) index += 1;
+    }
+
+    function scanString() {
+      const start = index;
+      if (raw[index] !== "\"") throw new Error("JSON_STRING_REQUIRED");
+      index += 1;
+      while (index < raw.length) {
+        const character = raw[index];
+        if (character === "\"") {
+          index += 1;
+          return JSON.parse(raw.slice(start, index));
+        }
+        if (character === "\\") {
+          index += 2;
+        } else {
+          if (character.charCodeAt(0) < 32) throw new Error("JSON_CONTROL_CHARACTER");
+          index += 1;
+        }
+      }
+      throw new Error("JSON_STRING_UNTERMINATED");
+    }
+
+    function scanValue() {
+      skipWhitespace();
+      if (raw[index] === "{") {
+        index += 1;
+        skipWhitespace();
+        const keys = new Set();
+        if (raw[index] === "}") {
+          index += 1;
+          return;
+        }
+        while (index < raw.length) {
+          const key = scanString();
+          if (keys.has(key)) throw new Error("JSON_DUPLICATE_KEY");
+          keys.add(key);
+          skipWhitespace();
+          if (raw[index] !== ":") throw new Error("JSON_COLON_REQUIRED");
+          index += 1;
+          scanValue();
+          skipWhitespace();
+          if (raw[index] === "}") {
+            index += 1;
+            return;
+          }
+          if (raw[index] !== ",") throw new Error("JSON_OBJECT_DELIMITER_REQUIRED");
+          index += 1;
+          skipWhitespace();
+        }
+        throw new Error("JSON_OBJECT_UNTERMINATED");
+      }
+      if (raw[index] === "[") {
+        index += 1;
+        skipWhitespace();
+        if (raw[index] === "]") {
+          index += 1;
+          return;
+        }
+        while (index < raw.length) {
+          scanValue();
+          skipWhitespace();
+          if (raw[index] === "]") {
+            index += 1;
+            return;
+          }
+          if (raw[index] !== ",") throw new Error("JSON_ARRAY_DELIMITER_REQUIRED");
+          index += 1;
+        }
+        throw new Error("JSON_ARRAY_UNTERMINATED");
+      }
+      if (raw[index] === "\"") {
+        scanString();
+        return;
+      }
+      const start = index;
+      while (index < raw.length && !/[\s,\]}]/.test(raw[index])) index += 1;
+      if (start === index) throw new Error("JSON_VALUE_REQUIRED");
+      JSON.parse(raw.slice(start, index));
+    }
+
+    try {
+      scanValue();
+      skipWhitespace();
+      if (index !== raw.length) return null;
+      return JSON.parse(raw);
+    } catch (error) {
+      return null;
+    }
+  }
+
   async function responseJson(response) {
     if (!response || typeof response !== "object") return null;
     try {
+      if (typeof response.text === "function") {
+        return parseJsonWithUniqueObjectKeys(await response.text());
+      }
       return await response.json();
     } catch (error) {
       return null;
@@ -749,7 +927,7 @@
         password: suppliedPassword,
       });
       const signedInSession = response.ok
-        ? normalizeSession(response.value, Math.floor(Number(nowMs()) / 1000))
+        ? normalizePasswordLoginResponse(response.value, Math.floor(Number(nowMs()) / 1000))
         : null;
       if (!signedInSession) {
         clearStoredSession();
