@@ -374,4 +374,1377 @@
     function clear() {
       inMemory = null;
       if (storage && typeof storage.removeItem === "function") {
-  ×ºæÚ$z{-®éÜj×&ööÆVâ‡V&Æ–46öæf–rbbWF‚ç6–væVD–âbb÷væW%fW&–f–VBbbWF†÷&—¦F–öå†6RÓÓÒ&WF†÷&—¦VB"’À¢6ä&ö÷G7G&f—'7D÷væW"À¢÷væW$&ö÷G7G&†6RÀ¢6öFS¢7G&–ær†Æ7D6öFRÇÂ""’À¢Æöv–å7FvRÀ¢6ÆÆ&6µ7FvRÀ¢6ÆÆ&6µFVÆVÖWG'’À¢77v÷&DÆöv–åFVÆVÖWG'’À¢Æ7EW6„ö³¢Æ7EW6…&W7VÇCòæö²ÓÓÒG'VRÀ¢Ò“°¢Ð ¢gVæ7F–öâV&Æ—6‚‚’°¢6öç7Bf6FRÒ7–æ46öæf–wW&F–öâ‚“°¢–b†6öæf–t’bbG—Vöb6öæf–t’çV&Æ—6…7–æ4f6FRÓÓÒ&gVæ7F–öâ"’6öæf–t’çV&Æ—6…7–æ4f6FR†f6FR“°¢6öç7B7FGW2ÒV&Æ–57FGW2‚“°¢–b‡G—Vöb6ÆÆ&6µFVÆVÖWG'•V&Æ—6†W"ÓÓÒ&gVæ7F–öâ"’°¢G'’°¢6ÆÆ&6µFVÆVÖWG'•V&Æ—6†W"‡7FGW2æ6ÆÆ&6µFVÆVÖWG'’Â7FGW2“°¢Ò6F6‚†W'&÷"’°¢òòF–væ÷7F–2&VæFW&–ær6ææ÷BÇFW"WF‚÷"WF†÷&—¦F–öâ7FFRà¢Ð¢Ð¢–b‡G—Vöb77v÷&DÆöv–åFVÆVÖWG'•V&Æ—6†W"ÓÓÒ&gVæ7F–öâ"’°¢G'’°¢77v÷&DÆöv–åFVÆVÖWG'•V&Æ—6†W"‡7FGW2ç77v÷&DÆöv–åFVÆVÖWG'’Â7FGW2“°¢Ò6F6‚†W'&÷"’°¢òòF–væ÷7F–2&VæFW&–ær6ææ÷BÇFW"WF‚÷"WF†÷&—¦F–öâ7FFRà¢Ð¢Ð¢–b‡F&vWBbbG—VöbF&vWBæF—7F6„WfVçBÓÓÒ&gVæ7F–öâ"bbG—Vöb&ö÷Còä7W7FöÔWfVçBÓÓÒ&gVæ7F–öâ"’°¢G'’°¢F&vWBæF—7F6„WfVçB†æWr&ö÷Bä7W7FöÔWfVçB‚&ÖFW&–Ç2×V÷FR×7W&6RÖWF‚Ö6†ævR"Â²FWF–Ã¢7FGW2Ò’“°¢Ò6F6‚†W'&÷"’°¢òòT’æ÷F–f–6F–öâf–ÇW&R×W7Bæ÷BÇFW"WF†÷&—¦F–öâà¢Ð¢Ð¢&WGW&â7FGW3°¢Ð ¢7–æ2gVæ7F–öâ–æ—F–Æ—¦R†6ÆÆ&6µ6÷W&6RÒçVÆÂ’°¢6öç7BG&ç6—F–öäE7F'BÒWF…G&ç6—F–öå&Wf—6–öã°¢6öç7B7W'&VçD–æ—F–Æ—¦U&Wf—6–öâÒ²¶–æ—F–Æ—¦U&Wf—6–öã°¢6öç7B†D6ÆÆ&6²Ò&ööÆVâ†6ÆÆ&6µ6÷W&6R“°¢6ÆÆ&6µFVÆVÖWG'’Ò†D6ÆÆ&6°¢òæ÷&ÖÆ—¦T6ÆÆ&6µFVÆVÖWG'’†6ÆÆ&6µ6÷W&6SòçFVÆVÖWG'’¢¢V×G”6ÆÆ&6µFVÆVÖWG'’‚“°¢6öç7B&W7F÷&VBÒ6ÆÆ&6µ6÷W&6P¢òv—B&÷f–FW"æW7F&Æ—6„Öv–4Æ–æµ6W76–öâ†6ÆÆ&6µ6÷W&6R¢¢v—B&÷f–FW"ç&W7F÷&U6W76–öâ‚“°¢–b‡G&ç6—F–öäE7F'BÓÒWF…G&ç6—F–öå&Wf—6–öâÇÂ7W'&VçD–æ—F–Æ—¦U&Wf—6–öâÓÒ–æ—F–Æ—¦U&Wf—6–öâ’°¢&WGW&â&W7F÷&VC°¢Ð¢÷væW%fW&–f–VBÒfÇ6S°¢WF†÷&—¦F–öå†6RÒ&–FÆR#°¢–b††D6ÆÆ&6²’°¢6öç7BF–væ÷7F–2Ò6ÆÆ&6´F–væ÷7F–72çw&—FR†6ÆÆ&6´F–væ÷7F–4f÷%&W7VÇB†6ÆÆ&6µ6÷W&6RÂ&W7F÷&VB’“°¢Æ7D6öFRÒF–væ÷7F–2æ6öFS°¢6ÆÆ&6µ7FvRÒF–væ÷7F–2ç7FvS°¢6ÆÆ&6µFVÆVÖWG'’Òf–æÆ—¦T6ÆÆ&6µFVÆVÖWG'’†6ÆÆ&6µFVÆVÖWG'’ÂF–væ÷7F–2Â&W7F÷&VB“°¢ÒVÇ6R–b‚&W7F÷&VBæö²’°¢6öç7B&Wf–÷W2Ò6ÆÆ&6´F–væ÷7F–72ç&VB‚“°¢6öç7BF–væ÷7F–2Ò&Wf–÷W2ÇÂ6ÆÆ&6´F–væ÷7F–72çw&—FR€¢&W7F÷&VBæ6öFRÓÓÒ%5U$4UôUD…õ4U54”ôåõ5Dõ$tUôd”ÄTB ¢ò4ÄÄ$4µôD”täõ5D”5õ5DEU4U2ç7F÷&vP¢¢4ÄÄ$4µôD”täõ5D”5õ5DEU4U2ææô6ÆÆ&6²À¢“°¢Æ7D6öFRÒF–væ÷7F–2æ6öFS°¢6ÆÆ&6µ7FvRÒF–væ÷7F–2ç7FvS°¢ÒVÇ6R°¢Æ7D6öFRÒ%5U$4UôUD…ôõtäU%ôtDUõ$UT•$TB#°¢6ÆÆ&6µ7FvRÒ"#°¢Ð¢V&Æ—6‚‚“°¢&WGW&â&W7F÷&VC°¢Ð ¢7–æ2gVæ7F–öâ6–vä–åv—F…77v÷&B†VÖ–ÂÂ77v÷&B’°¢WF…G&ç6—F–öå&Wf—6–öâ³Ò°¢6ÆÆ&6´F–væ÷7F–72æ6ÆV"‚“°¢6ÆÆ&6µ7FvRÒ"#°¢6ÆÆ&6µFVÆVÖWG'’ÒV×G”6ÆÆ&6µFVÆVÖWG'’‚“°¢77v÷&DÆöv–åFVÆVÖWG'’ÒV×G•77v÷&DÆöv–åFVÆVÖWG'’‚“°¢WF†÷&—¦F–öå†6RÒ&–FÆR#°¢÷væW%fW&–f–VBÒfÇ6S°¢–b†÷væW$&ö÷G7G&†6RÓÒ&6öç7VÖVB"’÷væW$&ö÷G7G&†6RÒ&–FÆR#°¢Æ7EW6…&W7VÇBÒçVÆÃ°¢Æöv–å7FvRÒ'&WVW7B×VæF–ær#°¢V&Æ—6‚‚“°¢6öç7B6–væVD–âÒv—B&÷f–FW"ç6–vä–åv—F…77v÷&B†VÖ–ÂÂ77v÷&B“°¢77v÷&DÆöv–åFVÆVÖWG'’Òæ÷&ÖÆ—¦U77v÷&DÆöv–åFVÆVÖWG'’‡&÷f–FW"ç7FGW2‚’ç77v÷&DÆöv–åFVÆVÖWG'’“°¢–b‚6–væVD–âæö²’°¢Æ7D6öFRÒ6–væVD–âæ6öFS°¢Æöv–å7FvRÒ6–væVD–âæ6öFRÓÓÒ%5U$4UôUD…ôÄôt”åõ$U5ôå4Uô”ådÄ”B ¢ò'&W7öç6RÖ–çfÆ–B ¢¢‡6–væVD–âæ6öFRÓÓÒ%5U$4UôUD…õ4U54”ôåõ5Dõ$tUôd”ÄTB"ò'7F÷&vR×&V¦V7FVB"¢'&WVW7B×&V¦V7FVB"“°¢V&Æ—6‚‚“°¢&WGW&â6–væVD–ã°¢Ð¢Æöv–å7FvRÒ'6W76–öâÖW7F&Æ—6†VB#°¢V&Æ—6‚‚“°¢6öç7BvFRÒv—BfW&–g”÷væW$ÖVÖ&W'6†—‚“°¢Æöv–å7FvRÒ&÷væW"ÖvFRÖ6ö×ÆWFR#°¢V&Æ—6‚‚“°¢&WGW&âvFRæö²ò6–væVD–â¢vFS°¢Ð ¢7–æ2gVæ7F–öâ6–vä÷WB‚’°¢WF…G&ç6—F–öå&Wf—6–öâ³Ò°¢6ÆÆ&6´F–væ÷7F–72æ6ÆV"‚“°¢6ÆÆ&6µ7FvRÒ"#°¢Æöv–å7FvRÒ&–FÆR#°¢77v÷&DÆöv–åFVÆVÖWG'’ÒV×G•77v÷&DÆöv–åFVÆVÖWG'’‚“°¢Æ7D6öFRÒ%5U$4UôUD…õ4”täTEôõUB#°¢WF†÷&—¦F–öå†6RÒ&–FÆR#°¢÷væW%fW&–f–VBÒfÇ6S°¢Æ7EW6…&W7VÇBÒçVÆÃ°¢6öç7B&W7VÇBÒv—B&÷f–FW"ç6–vä÷WB‚“°¢Æ7D6öFRÒ&W7VÇBæö²ò%5U$4UôUD…õ4”täTEôõUB"¢&W7VÇBæ6öFS°¢V&Æ—6‚‚“°¢&WGW&â&W7VÇC°¢Ð ¢7–æ2gVæ7F–öâfW&–g”÷væW$ÖVÖ&W'6†—‚’°¢–b‚V&Æ–46öæf–r’°¢Æ7D6öFRÒ%5U$4UõT$Ä”5ô4ôäd”uõ$UT•$TB#°¢÷væW%fW&–f–VBÒfÇ6S°¢V&Æ—6‚‚“°¢&WGW&âW'&÷%&W7VÇB†Æ7D6öFR“°¢Ð¢6öç7BvFRÒv—B&÷f–FW"çfW&–g”÷væW$ÖVÖ&W'6†—‚“°¢÷væW%fW&–f–VBÒvFRæö²ÓÓÒG'VS°¢Æ7D6öFRÒvFRæö²ò%5U$4Uôdõ$ÔÅõU4…ô4ôäd•$ÔD”ôåõ$UT•$TB"¢vFRæ6öFS°¢–b‚vFRæö²’WF†÷&—¦F–öå†6RÒWF†÷&—¦F–öå†6RÓÓÒ&6öç7VÖVB"ò&6öç7VÖVB"¢&–FÆR#°¢V&Æ—6‚‚“°¢&WGW&âvFS°¢Ð ¢7–æ2gVæ7F–öâ&ö÷G7G&f—'7D÷væW"‚’°¢6öç7BWF‚Ò&÷f–FW"ç7FGW2‚“°¢–b‚V&Æ–46öæf–r’&WGW&âW'&÷%&W7VÇB‚%5U$4UõT$Ä”5ô4ôäd”uõ$UT•$TB"“°¢–b‚WF‚ç6–væVD–â’&WGW&âW'&÷%&W7VÇB‚%5U$4UôUD…õ4”täTEôõUB"“°¢–b†÷væW$&ö÷G7G&†6RÓÓÒ&–âÖfÆ–v‡B"’&WGW&âW'&÷%&W7VÇB‚%5U$4UôUD…ôõtäU%ô$ôõE5E$ô”åôdÄ”t…B"“°¢–b†÷væW$&ö÷G7G&†6RÓÓÒ&6öç7VÖVB"’&WGW&âW'&÷%&W7VÇB‚%5U$4UôUD…ôõtäU%ô$ôõE5E$ôÅ$TE•ô4ôå5TÔTB"“°¢–b†÷væW%fW&–f–VBÇÂÆ7D6öFRÓÒ%5U$4UôUD…ôÔTÔ$U%4„•ô”ådÄ”B"’°¢&WGW&âW'&÷%&W7VÇB‚%5U$4UôUD…ôõtäU%ô$ôõE5E$ôäõEôd”Ä$ÄR"“°¢Ð¢÷væW$&ö÷G7G&†6RÒ&–âÖfÆ–v‡B#°¢Æ7D6öFRÒ%5U$4UôUD…ôõtäU%ô$ôõE5E$ô”åôdÄ”t…B#°¢V&Æ—6‚‚“°¢6öç7B7&VFVBÒv—B&÷f–FW"æ&ö÷G7G&f—'7D÷væW"‚“°¢÷væW$&ö÷G7G&†6RÒ&6öç7VÖVB#°¢–b‚7&VFVBæö²’°¢÷væW%fW&–f–VBÒfÇ6S°¢Æ7D6öFRÒ7&VFVBæ6öFS°¢V&Æ—6‚‚“°¢&WGW&â7&VFVC°¢Ð¢6öç7BvFRÒv—B&÷f–FW"çfW&–g”÷væW$ÖVÖ&W'6†—‚“°¢÷væW%fW&–f–VBÒvFRæö²ÓÓÒG'VS°¢Æ7D6öFRÒvFRæö°¢ò%5U$4Uôdõ$ÔÅõU4…ô4ôäd•$ÔD”ôåõ$UT•$TB ¢¢%5U$4UôUD…ôõtäU%ô$ôõE5E$õõ5D4„T4µôd”ÄTB#°¢V&Æ—6‚‚“°¢&WGW&âvFRæö°¢òö&¦V7Bæg&VW¦R‡²ö³¢G'VRÂ6öFS¢""Â&öÆS¢&÷væW""Â÷&væ—¦F–öä–C¢7G&–ær‡V&Æ–46öæf–ræ÷&væ—¦F–öä–BÇÂ""’Ò¢¢W'&÷%&W7VÇB†Æ7D6öFR“°¢Ð ¢7–æ2gVæ7F–öâWF†÷&—¦Tf÷&ÖÅW6„öæ6R‡²6öæf—&ÖF–öâÂ'F–f7DvFW466WFVBÒÒ·Ò’°¢–b†WF†÷&—¦F–öå†6RÓÓÒ&–âÖfÆ–v‡B"’&WGW&âW'&÷%&W7VÇB‚%5U$4Uôdõ$ÔÅõU4…ô”åôdÄ”t…B"“°¢–b†WF†÷&—¦F–öå†6RÓÓÒ&6öç7VÖVB"’&WGW&âW'&÷%&W7VÇB‚%5U$4Uôdõ$ÔÅõU4…ôÅ$TE•ô4ôå5TÔTB"“°¢–b‚V&Æ–46öæf–r’&WGW&âW'&÷%&W7VÇB‚%5U$4UõT$Ä”5ô4ôäd”uõ$UT•$TB"“°¢–b†6öæf—&ÖF–öâÓÒdõ$ÔÅõU4…ô4ôäd•$ÔD”ôâÇÂ'F–f7DvFW466WFVBÓÒG'VR’°¢Æ7D6öFRÒ%5U$4Uôdõ$ÔÅõU4…ô4ôäd•$ÔD”ôåõ$UT•$TB#°¢V&Æ—6‚‚“°¢&WGW&âW'&÷%&W7VÇB†Æ7D6öFR“°¢Ð¢6öç7BvFRÒv—BfW&–g”÷væW$ÖVÖ&W'6†—‚“°¢–b‚vFRæö²’&WGW&âvFS°¢WF†÷&—¦F–öå†6RÒ&WF†÷&—¦VB#°¢Æ7D6öFRÒ"#°¢Æ7EW6…&W7VÇBÒçVÆÃ°¢V&Æ—6‚‚“°¢&WGW&âö&¦V7Bæg&VW¦R‡²ö³¢G'VRÂ6öFS¢""Ò“°¢Ð ¢7–æ2gVæ7F–öâW†V7WFTf÷&ÖÅW6‚‡W6‚’°¢–b†WF†÷&—¦F–öå†6RÓÓÒ&–âÖfÆ–v‡B"’&WGW&âW'&÷%&W7VÇB‚%5U$4Uôdõ$ÔÅõU4…ô”åôdÄ”t…B"“°¢–b†WF†÷&—¦F–öå†6RÓÓÒ&6öç7VÖVB"’&WGW&âW'&÷%&W7VÇB‚%5U$4Uôdõ$ÔÅõU4…ôÅ$TE•ô4ôå5TÔTB"“°¢–b†WF†÷&—¦F–öå†6RÓÒ&WF†÷&—¦VB"ÇÂG—VöbW6‚ÓÒ&gVæ7F–öâ"’°¢&WGW&âW'&÷%&W7VÇB‚%5U$4Uôdõ$ÔÅõU4…ôäõEôUD„õ$•¤TB"“°¢Ð¢WF†÷&—¦F–öå†6RÒ&–âÖfÆ–v‡B#°¢Æ7D6öFRÒ"#°¢V&Æ—6‚‚“°¢6öç7BvFRÒv—B&÷f–FW"çfW&–g”÷væW$ÖVÖ&W'6†—‚“°¢÷væW%fW&–f–VBÒvFRæö²ÓÓÒG'VS°¢–b‚vFRæö²’°¢WF†÷&—¦F–öå†6RÒ&6öç7VÖVB#°¢Æ7D6öFRÒvFRæ6öFS°¢Æ7EW6…&W7VÇBÒvFS°¢V&Æ—6‚‚“°¢&WGW&âvFS°¢Ð¢ÆWB&W7VÇC°¢G'’°¢&W7VÇBÒv—BW6‚‚“°¢Ò6F6‚†W'&÷"’°¢&W7VÇBÒW'&÷%&W7VÇB‚%5U$4Uôdõ$ÔÅõU4…ôd”ÄTB"“°¢Ð¢–b‚&W7VÇBÇÂG—Vöb&W7VÇBÓÒ&ö&¦V7B"’&W7VÇBÒW'&÷%&W7VÇB‚%5U$4Uôdõ$ÔÅõU4…õ$U5TÅEô”ådÄ”B"“°¢WF†÷&—¦F–öå†6RÒ&6öç7VÖVB#°¢Æ7D6öFRÒ&W7VÇBæö²ò""¢7G&–ær‡&W7VÇBæ6öFRÇÂ%5U$4Uôdõ$ÔÅõU4…ôd”ÄTB"“°¢Æ7EW6…&W7VÇBÒ&W7VÇC°¢V&Æ—6‚‚“°¢&WGW&â&W7VÇC°¢Ð ¢&÷f–FW"æöäWF…7FFT6†ævR‚†WfVçB’Óâ°¢–b†WfVçBÓÓÒ%4”täTEôõUB"’°¢÷væW%fW&–f–VBÒfÇ6S°¢–b†WF†÷&—¦F–öå†6RÓÒ&6öç7VÖVB"’WF†÷&—¦F–öå†6RÒ&–FÆR#°¢6öç7BF–væ÷7F–2Ò4ÄÄ$4µôD”täõ5D”5ô%•ô4ôDRævWB†Æ7D6öFR“°¢–b‚F–væ÷7F–2ÇÂF–væ÷7F–2ÓÓÒ4ÄÄ$4µôD”täõ5D”5õ5DEU4U2ç7V66W72’°¢Æ7D6öFRÒ%5U$4UôUD…õ4”täTEôõUB#°¢6ÆÆ&6µ7FvRÒ"#°¢Ð¢Ð¢V&Æ—6‚‚“°¢Ò“° ¢V&Æ—6‚‚“° ¢&WGW&âö&¦V7Bæg&VW¦R‡°¢–æ—F–Æ—¦RÀ¢6–vä–åv—F…77v÷&BÀ¢6–vä÷WBÀ¢fW&–g”÷væW$ÖVÖ&W'6†—À¢&ö÷G7G&f—'7D÷væW"À¢WF†÷&—¦Tf÷&ÖÅW6„öæ6RÀ¢W†V7WFTf÷&ÖÅW6‚À¢vWE7–æ46öæf–wW&F–öã¢7–æ46öæf–wW&F–öâÀ¢7FGW3¢V&Æ–57FGW2À¢WF…&÷f–FW#¢&÷f–FW"À¢Ò“°¢Ð ¢gVæ7F–öâVç7W&TvÆö&ÄWF„F–væ÷7F–4æöFR†'&÷w6W%&ö÷B’°¢6öç7BFö7VÖVçBÒ'&÷w6W%&ö÷CòæFö7VÖVçC°¢–b‚Fö7VÖVçBÇÂG—VöbFö7VÖVçBævWDVÆVÖVçD'”–BÓÒ&gVæ7F–öâ"’&WGW&âçVÆÃ°¢ÆWBæöFRÒFö7VÖVçBævWDVÆVÖVçD'”–B„tÄô$ÅôUD…ôD”täõ5D”5ôäôDUô”B“°¢–b†æöFR’&WGW&âæöFS°¢–b‡G—VöbFö7VÖVçBæ7&VFTVÆVÖVçBÓÒ&gVæ7F–öâ"’&WGW&âçVÆÃ°¢æöFRÒFö7VÖVçBæ7&VFTVÆVÖVçB‚&ÖWF"“°¢æöFRæ–BÒtÄô$ÅôUD…ôD”täõ5D”5ôäôDUô”C°¢æöFRæ†–FFVâÒG'VS°¢æöFRç6WDGG&–'WFR‚&FF×7W&6RÖWF‚ÖvÆö&ÂÖF–væ÷7F–2"Â""“°¢6öç7B&VçBÒFö7VÖVçBæ†VBÇÂFö7VÖVçBæFö7VÖVçDVÆVÖVçC°¢–b‚&VçBÇÂG—Vöb&VçBæVæD6†–ÆBÓÒ&gVæ7F–öâ"’&WGW&âçVÆÃ°¢&VçBæVæD6†–ÆB†æöFR“°¢&WGW&âæöFS°¢Ð ¢gVæ7F–öâw&—FTvÆö&Å77v÷&DÆöv–åFVÆVÖWG'’†'&÷w6W%&ö÷BÂFVÆVÖWG'’’°¢6öç7BæöFRÒVç7W&TvÆö&ÄWF„F–væ÷7F–4æöFR†'&÷w6W%&ö÷B“°¢–b‚æöFRÇÂG—VöbæöFRç6WDGG&–'WFRÓÒ&gVæ7F–öâ"’&WGW&âfÇ6S°¢6öç7B6fRÒæ÷&ÖÆ—¦U77v÷&DÆöv–åFVÆVÖWG'’‡FVÆVÖWG'’“°¢6öç7BÆ—7BÒ†w&÷WÂ66÷R’Óâ6fU¶w&÷WÕ·66÷UÒæ¦ö–â‚"Â"“°¢6öç7B&ööÆVâÒ‡fÇVR’ÓâfÇVRÓÓÒG'VRò#"¢##°¢æöFRç6WDGG&–'WFR‚&FF×7W&6RÖWF‚×77v÷&B×&W7öç6RÖ6öçF–æW""Â6fRæ6öçF–æW"“°¢æöFRç6WDGG&–'WFR‚&FF×7W&6RÖWF‚×77v÷&B×&W7öç6R×7FvR"Â6fRç7FvR“°¢æöFRç6WDGG&–'WFR‚&FF×7W&6RÖWF‚×77v÷&B×&W7öç6R×&V6öâ"Â6fRç&V6öâ“°¢f÷"†6öç7B66÷Röb55tõ$EõDTÄTÔUE%•õ44õU2’°¢6öç7BGG&–'WFU66÷RÒ66÷RÓÓÒ'F÷ÆWfVÂ"ò'F÷"¢66÷S°¢æöFRç6WDGG&–'WFR†FF×7W&6RÖWF‚×77v÷&B×&W7öç6RÒG¶GG&–'WFU66÷WÒÖf–VÆG6ÂÆ—7B‚&f–VÆG2"Â66÷R’“°¢æöFRç6WDGG&–'WFR†FF×7W&6RÖWF‚×77v÷&B×&W7öç6RÒG¶GG&–'WFU66÷WÒ×G—W6ÂÆ—7B‚'G—W2"Â66÷R’“°¢Ð¢f÷"†6öç7BæÖRöb²&GWÆ–6FR"Â&Ö—†VB"Â&6öæfÆ–7B"Â'Væ¶æ÷vâ%Ò’°¢æöFRç6WDGG&–'WFR†FF×7W&6RÖWF‚×77v÷&B×&W7öç6RÒG¶æÖWÖÂ&ööÆVâ‡6fRæfÆw5¶æÖUÒ’“°¢Ð¢f÷"†6öç7BæÖRöb²&FF"Â'6W76–öâ"Â'W6W""Â&W'&÷""Â'vVµ÷77v÷&B"Â'vVµ77v÷&B%Ò’°¢æöFRç6WDGG&–'WFR†FF×7W&6RÖWF‚×77v÷&B×&W7öç6RÖ†2ÒG¶æÖRç&WÆ6R‚õòörÂ"Ò"—ÖÂ&ööÆVâ‡6fRç&W6Væ6U¶æÖUÒ’“°¢Ð¢&WGW&âG'VS°¢Ð ¢gVæ7F–öâ&ö÷G7G&'&÷w6W%'VçF–ÖR†'&÷w6W%&ö÷BÒ&ö÷B’°¢–b‚'&÷w6W%&ö÷BÇÂ'&÷w6W%&ö÷BäÖFW&–Ç5V÷FU7W&6U'VçF–ÖR’&WGW&â'&÷w6W%&ö÷CòäÖFW&–Ç5V÷FU7W&6U'VçF–ÖRÇÂçVÆÃ°¢6öç7B6öæf–t’Ò'&÷w6W%&ö÷BäÖFW&–Ç5V÷FU7W&6U'VçF–ÖT6öæf–s°¢6öç7B6öæf–rÒ6öæf–t“òævWD7W'&VçD6öæf–wW&F–öãòâ‚’ÇÂçVÆÃ°¢6öç7BfWF6„–×ÂÒG—Vöb'&÷w6W%&ö÷BæfWF6‚ÓÓÒ&gVæ7F–öâ"ò'&÷w6W%&ö÷BæfWF6‚æ&–æB†'&÷w6W%&ö÷B’¢çVÆÃ°¢ÆWB'&÷w6W%7F÷&vRÒçVÆÃ°¢ÆWB6ÆÆ&6´F–væ÷7F–57F÷&vRÒçVÆÃ°¢G'’°¢'&÷w6W%7F÷&vRÒ'&÷w6W%&ö÷BæÆö6Å7F÷&vS°¢Ò6F6‚†W'&÷"’°¢'&÷w6W%7F÷&vRÒçVÆÃ°¢Ð¢G'’°¢6ÆÆ&6´F–væ÷7F–57F÷&vRÒ'&÷w6W%&ö÷Bç6W76–öå7F÷&vS°¢Ò6F6‚†W'&÷"’°¢6ÆÆ&6´F–væ÷7F–57F÷&vRÒçVÆÃ°¢Ð¢ÆWB6ÆÆ&6µ6÷W&6RÒ'&÷w6W%&ö÷BäÖFW&–Ç5V÷FU7W&6TWF„6ÆÆ&6²ÇÂçVÆÃ°¢6öç7B&÷f–FW"Ò6öæf–p¢ò7&VFU7W&6TWF…&÷f–FW"‡²6öæf–rÂfWF6„–×ÂÂ7F÷&vS¢'&÷w6W%7F÷&vRÒ¢¢7&VFUVæf–Æ&ÆU&÷f–FW"†6öæf–t“òç7FGW3òâ‚’æ6öFRÇÂ%5U$4UõT$Ä”5ô4ôäd”uõ$UT•$TB"“°¢6öç7B–çFVw&F–öâÒ7&VFU'VçF–ÖTWF„–çFVw&F–öâ‡°¢6öæf–rÀ¢WF…&÷f–FW#¢&÷f–FW"À¢6öæf–t’À¢fWF6„–×ÂÀ¢WfVçEF&vWC¢'&÷w6W%&ö÷BÀ¢6ÆÆ&6´F–væ÷7F–57F÷&vRÀ¢–æ—F–Ä6ÆÆ&6µFVÆVÖWG'“¢6ÆÆ&6µ6÷W&6SòçFVÆVÖWG'’ÇÂçVÆÂÀ¢6ÆÆ&6µFVÆVÖWG'•V&Æ—6†W#¢‡FVÆVÖWG'’Â7FGW2’Óâ°¢6öç7B'&–FvRÒ'&÷w6W%&ö÷BäÖFW&–Ç5V÷FU7W&6TWF„6ÆÆ&6´'&–FvS°¢–b†'&–FvRbbG—Vöb'&–FvRçw&—FTvÆö&ÅFVÆVÖWG'’ÓÓÒ&gVæ7F–öâ"’°¢'&–FvRçw&—FTvÆö&ÅFVÆVÖWG'’†'&÷w6W%&ö÷BÂFVÆVÖWG'’Â7FGW3òç6–væVD–âÓÓÒG'VRò'6–væVBÖ–â"¢'6–væVBÖ÷WB"“°¢Ð¢ÒÀ¢77v÷&DÆöv–åFVÆVÖWG'•V&Æ—6†W#¢‡FVÆVÖWG'’’Óâ°¢w&—FTvÆö&Å77v÷&DÆöv–åFVÆVÖWG'’†'&÷w6W%&ö÷BÂFVÆVÖWG'’“°¢ÒÀ¢Ò“°¢'&÷w6W%&ö÷BäÖFW&–Ç5V÷FU7W&6U'VçF–ÖRÒ–çFVw&F–öã°¢'&÷w6W%&ö÷BäÖFW&–Ç5V÷FU7W&6U7–æ46öæf–rÒ–çFVw&F–öâævWE7–æ46öæf–wW&F–öâ‚“°¢G'’°¢FVÆWFR'&÷w6W%&ö÷BäÖFW&–Ç5V÷FU7W&6TWF„6ÆÆ&6³°¢Ò6F6‚†W'&÷"’°¢G'’°¢'&÷w6W%&ö÷BäÖFW&–Ç5V÷FU7W&6TWF„6ÆÆ&6²ÒçVÆÃ°¢Ò6F6‚†–væ÷&VB’°¢òòF†R&÷f–FW"7F–ÆÂVæf÷&6W26–ævÆR6ÆÆ&6²6öç7V×F–öâà¢Ð¢Ð¢&öÖ—6Rç&W6öÇfR†–çFVw&F–öâæ–æ—F–Æ—¦R†6ÆÆ&6µ6÷W&6R’’çF†Vâ‚‡&W7VÇB’Óâ°¢6ÆÆ&6µ6÷W&6RÒçVÆÃ°¢–b‡&W7VÇCòæö²ÓÓÒG'VRbb&W7VÇBæ6ÆÆ&6²bb'&÷w6W%&ö÷BæÆö6F–öâ’°¢'&÷w6W%&ö÷BæÆö6F–öâæ†6‚Ò"2÷6WGF–æw2ö6ö×ç’#°¢Ð¢Ò“°¢–b†6öæf–rbbG—Vöb'&÷w6W%&ö÷BæFDWfVçDÆ—7FVæW"ÓÓÒ&gVæ7F–öâ"’°¢'&÷w6W%&ö÷BæFDWfVçDÆ—7FVæW"‚'7F÷&vR"Â†WfVçB’Óâ°¢–b†WfVçCòæ¶W’ÓÓÒ&÷f–FW"ç6W76–öå7F÷&vT¶W’’–çFVw&F–öâæ–æ—F–Æ—¦R‚“°¢Ò“°¢Ð¢&WGW&â–çFVw&F–öã°¢Ð ¢&WGW&âö&¦V7Bæg&VW¦R‡°¢dõ$ÔÅõU4…ô4ôäd•$ÔD”ôâÀ¢UD…õ%TåD”ÔUõdU%4”ôâÀ¢Ôt”5ôÄ”äµô4ÄÄ$4µõU$ÂÀ¢Ôt”5ôÄ”äµô4ÄÄ$4µõU$Å2À¢4ÄÄ$4µôD”täõ5D”5õ5Dõ$tUô´U’À¢4ÄÄ$4µôD”täõ5D”5õ5DEU4U2À¢V×G•77v÷&DÆöv–åFVÆVÖWG'’À¢w&—FTvÆö&Å77v÷&DÆöv–åFVÆVÖWG'’À¢'6TÖv–4Æ–æ´6ÆÆ&6²À¢fÆ–FFTÖv–4Æ–æ´66W75Fö¶VâÀ¢7&VFU7W&6TWF…&÷f–FW"À¢7&VFU'VçF–ÖTWF„–çFVw&F–öâÀ¢&ö÷G7G&'&÷w6W%'VçF–ÖRÀ¢Ò“°§Ò“°
+        try {
+          storage.removeItem(CALLBACK_DIAGNOSTIC_STORAGE_KEY);
+        } catch (error) {
+          // A denied cleanup does not alter Auth state.
+        }
+      }
+    }
+
+    return Object.freeze({ read, write, clear });
+  }
+
+  function callbackDiagnosticForResult(callbackSource, result) {
+    if (!callbackSource) return CALLBACK_DIAGNOSTIC_STATUSES.noCallback;
+    if (result?.ok === true) return CALLBACK_DIAGNOSTIC_STATUSES.success;
+    const code = String(result?.code || "");
+    const stage = String(result?.callbackStage || "");
+    if (stage === "pkce" || code === "SUPABASE_AUTH_PKCE_CONTEXT_UNAVAILABLE" || code.startsWith("SUPABASE_AUTH_PKCE_HTTP_")) {
+      return CALLBACK_DIAGNOSTIC_STATUSES.pkce;
+    }
+    if (stage === "project-identity" || code === "SUPABASE_AUTH_CALLBACK_PROJECT_IDENTITY_INVALID") {
+      return CALLBACK_DIAGNOSTIC_STATUSES.project;
+    }
+    if (stage === "session-storage" || code === "SUPABASE_AUTH_SESSION_STORAGE_FAILED") {
+      return CALLBACK_DIAGNOSTIC_STATUSES.storage;
+    }
+    if (stage === "user-probe"
+      || code === "SUPABASE_AUTH_CALLBACK_USER_INVALID"
+      || code === "SUPABASE_AUTH_NETWORK_ERROR"
+      || code === "SUPABASE_AUTH_RESPONSE_IDENTITY_INVALID") {
+      return CALLBACK_DIAGNOSTIC_STATUSES.user;
+    }
+    return CALLBACK_DIAGNOSTIC_STATUSES.shape;
+  }
+
+  function decodeBase64UrlJson(segment) {
+    const source = String(segment || "");
+    if (!source || source.length > TOKEN_MAX_LENGTH || !/^[A-Za-z0-9_-]+$/.test(source) || source.length % 4 === 1) return null;
+    try {
+      const base64 = source.replace(/-/g, "+").replace(/_/g, "/");
+      const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+      let json;
+      let canonical;
+      if (typeof Buffer !== "undefined") {
+        const bytes = Buffer.from(padded, "base64");
+        canonical = bytes.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+        json = bytes.toString("utf8");
+        if (!Buffer.from(json, "utf8").equals(bytes)) return null;
+      } else {
+        const binary = root.atob(padded);
+        canonical = root.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+        json = decodeURIComponent(Array.from(binary, (character) => `%${character.charCodeAt(0).toString(16).padStart(2, "0")}`).join(""));
+      }
+      if (canonical !== source) return null;
+      const value = JSON.parse(json);
+      return isRecord(value) ? value : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function parseCallbackParameters(rawValue, prefix, allowedFields) {
+    const raw = String(rawValue || "");
+    if (!raw) return Object.freeze({ ok: true, values: Object.freeze({}), count: 0 });
+    if (raw.length > CALLBACK_MAX_LENGTH || raw[0] !== prefix || raw === prefix || /%(?![0-9A-Fa-f]{2})/.test(raw)) {
+      return errorResult("SUPABASE_AUTH_CALLBACK_ENCODING_INVALID");
+    }
+    const values = {};
+    let count = 0;
+    try {
+      const params = new URLSearchParams(raw.slice(1));
+      for (const [key, value] of params.entries()) {
+        count += 1;
+        if (!allowedFields.has(key)
+          || hasOwn(values, key)
+          || value === ""
+          || value.length > TOKEN_MAX_LENGTH
+          || /[\u0000-\u001F\u007F]/.test(value)) {
+          return errorResult("SUPABASE_AUTH_CALLBACK_FIELDS_INVALID");
+        }
+        values[key] = value;
+      }
+    } catch (error) {
+      return errorResult("SUPABASE_AUTH_CALLBACK_ENCODING_INVALID");
+    }
+    if (count === 0) return errorResult("SUPABASE_AUTH_CALLBACK_FIELDS_INVALID");
+    return Object.freeze({ ok: true, values: Object.freeze(values), count });
+  }
+
+  function exactMagicLinkPageIdentity(callbackSource) {
+    if (!callbackSource || callbackSource.scrubbed !== true || callbackSource.oversized === true) return false;
+    return String(callbackSource.origin || "") === MAGIC_LINK_CALLBACK_ORIGIN
+      && MAGIC_LINK_CALLBACK_PATHS.has(String(callbackSource.pathname || ""));
+  }
+
+  function parseMagicLinkCallback(callbackSource) {
+    if (!exactMagicLinkPageIdentity(callbackSource)) {
+      return errorResult("SUPABASE_AUTH_CALLBACK_PAGE_IDENTITY_INVALID");
+    }
+    const query = parseCallbackParameters(callbackSource.search, "?", CALLBACK_QUERY_FIELDS);
+    const fragment = parseCallbackParameters(callbackSource.hash, "#", CALLBACK_FRAGMENT_FIELDS);
+    if (!query.ok) return query;
+    if (!fragment.ok) return fragment;
+    if (query.count > 0 && fragment.count > 0) return errorResult("SUPABASE_AUTH_CALLBACK_CONFLICT");
+    if (query.count === 0 && fragment.count === 0) return errorResult("SUPABASE_AUTH_CALLBACK_MISSING");
+
+    if (query.count > 0) {
+      const values = query.values;
+      const keys = Object.keys(values).sort();
+      if (!keys.every((key) => ["code", "type"].includes(key))
+        || !hasOwn(values, "code")
+        || !AUTH_CODE_PATTERN.test(values.code)
+        || (hasOwn(values, "type") && values.type !== "magiclink")) {
+        return errorResult("SUPABASE_AUTH_CALLBACK_FIELDS_INVALID");
+      }
+      return Object.freeze({ ok: true, code: "", mode: "pkce", authCode: values.code });
+    }
+
+    const values = fragment.values;
+    const required = ["access_token", "expires_in", "refresh_token", "token_type", "type"];
+    if (!required.every((key) => hasOwn(values, key))
+      || !Object.keys(values).every((key) => required.includes(key) || key === "expires_at")
+      || values.type !== "magiclink"
+      || String(values.token_type).toLowerCase() !== "bearer") {
+      return errorResult("SUPABASE_AUTH_CALLBACK_FIELDS_INVALID");
+    }
+    const expiresIn = Number(values.expires_in);
+    const expiresAt = hasOwn(values, "expires_at") ? Number(values.expires_at) : null;
+    if (!Number.isSafeInteger(expiresIn)
+      || expiresIn < 1
+      || expiresIn > 86400
+      || (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt < 1))
+      || String(values.access_token).length > TOKEN_MAX_LENGTH
+      || String(values.refresh_token).length < 20
+      || String(values.refresh_token).length > TOKEN_MAX_LENGTH) {
+      return errorResult("SUPABASE_AUTH_CALLBACK_SESSION_INVALID");
+    }
+    return Object.freeze({
+      ok: true,
+      code: "",
+      mode: "implicit",
+      accessToken: values.access_token,
+      refreshToken: values.refresh_token,
+      expiresAt,
+    });
+  }
+
+  function validateMagicLinkAccessToken(accessToken, config, nowSeconds) {
+    const token = String(accessToken || "");
+    const projectRef = String(config?.expectedProjectRef || "");
+    const projectUrl = normalizeUrl(config?.projectUrl);
+    if (!PROJECT_REF_PATTERN.test(projectRef)
+      || projectUrl !== `https://${projectRef}.supabase.co`
+      || token.length > TOKEN_MAX_LENGTH) {
+      return null;
+    }
+    const parts = token.split(".");
+    if (parts.length !== 3 || !parts[2] || !/^[A-Za-z0-9_-]+$/.test(parts[2])) return null;
+    const header = decodeBase64UrlJson(parts[0]);
+    const payload = decodeBase64UrlJson(parts[1]);
+    if (!header
+      || !payload
+      || !["HS256", "RS256", "ES256"].includes(header.alg)
+      || (hasOwn(header, "typ") && header.typ !== "JWT")
+      || payload.iss !== `${projectUrl}/auth/v1`
+      || payload.role !== "authenticated"
+      || !UUID_PATTERN.test(String(payload.sub || ""))
+      || (hasOwn(payload, "ref") && payload.ref !== projectRef)) {
+      return null;
+    }
+    const audience = payload.aud;
+    if (audience !== "authenticated"
+      && !(Array.isArray(audience) && audience.length > 0 && audience.every((entry) => entry === "authenticated"))) {
+      return null;
+    }
+    const expiresAt = Number(payload.exp);
+    return Number.isSafeInteger(expiresAt) && expiresAt > nowSeconds ? payload : null;
+  }
+
+  function normalizeUrl(value) {
+    try {
+      const url = new URL(String(value || ""));
+      return url.protocol === "https:" ? url.origin : "";
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function normalizeSession(source, issuedAtSeconds = null) {
+    if (!source || typeof source !== "object" || Array.isArray(source)) return null;
+    const accessToken = String(source.access_token || "");
+    const refreshToken = String(source.refresh_token || "");
+    const expiresIn = Number(source.expires_in);
+    const expiresAt = hasOwn(source, "expires_at")
+      ? Number(source.expires_at)
+      : (Number.isSafeInteger(issuedAtSeconds)
+        && Number.isSafeInteger(expiresIn)
+        && expiresIn > 0
+        && expiresIn <= 86400
+          ? issuedAtSeconds + expiresIn
+          : Number.NaN);
+    const user = source.user && typeof source.user === "object" ? source.user : null;
+    const userId = String(user?.id || "");
+    const tokenType = String(source.token_type || "").toLowerCase();
+    if (accessToken.length < 32
+      || accessToken.length > TOKEN_MAX_LENGTH
+      || refreshToken.length < 20
+      || refreshToken.length > TOKEN_MAX_LENGTH
+      || tokenType !== "bearer"
+      || !Number.isSafeInteger(expiresIn)
+      || expiresIn < 0
+      || expiresIn > 86400
+      || !Number.isSafeInteger(expiresAt)
+      || expiresAt <= 0
+      || !UUID_PATTERN.test(userId)) {
+      return null;
+    }
+    return Object.freeze({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      expires_at: Math.floor(expiresAt),
+      expires_in: Number.isFinite(expiresIn) ? expiresIn : 0,
+      token_type: "bearer",
+      user: Object.freeze({
+        id: userId,
+        email: String(user.email || ""),
+      }),
+    });
+  }
+
+  function validWeakPasswordMetadata(value) {
+    if (value === null) return true;
+    if (!hasExactFields(value, new Set(["message", "reasons"]), ["message", "reasons"])
+      || typeof value.message !== "string"
+      || value.message.length > 2048
+      || !Array.isArray(value.reasons)
+      || value.reasons.length > WEAK_PASSWORD_REASONS.size
+      || !value.reasons.every((reason) => WEAK_PASSWORD_REASONS.has(String(reason)))) {
+      return false;
+    }
+    return new Set(value.reasons.map(String)).size === value.reasons.length;
+  }
+
+  function inspectPasswordLoginResponse(value, parseDiagnostic = {}) {
+    const record = isRecord(value) ? value : null;
+    const hasData = Boolean(record && hasOwn(record, "data"));
+    const hasFlatSessionField = Boolean(record && PASSWORD_SESSION_REQUIRED_FIELDS.some((key) => hasOwn(record, key)));
+    const container = hasData ? "nested" : (hasFlatSessionField || hasOwn(record || {}, "weak_password") ? "flat" : "other");
+    const dataValue = hasData && isRecord(record.data) ? record.data : null;
+    const sessionValue = container === "nested"
+      ? (isRecord(dataValue?.session) ? dataValue.session : null)
+      : (container === "flat" ? record : null);
+    const sessionUser = isRecord(sessionValue?.user) ? sessionValue.user : null;
+    const dataUser = isRecord(dataValue?.user) ? dataValue.user : null;
+    const userValue = sessionUser || dataUser;
+    const described = {
+      topLevel: describeTelemetryRecord(record),
+      data: describeTelemetryRecord(dataValue),
+      session: describeTelemetryRecord(sessionValue),
+      user: describeTelemetryRecord(userValue),
+    };
+    const fields = {};
+    const types = {};
+    for (const scope of PASSWORD_TELEMETRY_SCOPES) {
+      fields[scope] = described[scope].fields;
+      types[scope] = described[scope].types;
+    }
+    const topAllowed = container === "nested" ? PASSWORD_NESTED_RESPONSE_FIELDS : PASSWORD_FLAT_RESPONSE_FIELDS;
+    const topUnknown = Boolean(record && Object.keys(record).some((key) => !topAllowed.has(key)));
+    const dataUnknown = Boolean(dataValue && Object.keys(dataValue).some((key) => !PASSWORD_NESTED_DATA_FIELDS.has(key)));
+    const sessionUnknown = Boolean(sessionValue && Object.keys(sessionValue).some((key) => !PASSWORD_SESSION_FIELDS.has(key)
+      && !(container === "flat" && key === "weak_password")));
+    const mixed = Boolean(hasData && (
+      PASSWORD_SESSION_REQUIRED_FIELDS.some((key) => hasOwn(record, key))
+      || hasOwn(record, "expires_at")
+      || hasOwn(record, "weak_password")
+    ));
+    const conflict = Boolean(container === "nested"
+      && sessionUser
+      && dataUser
+      && (String(sessionUser.id || "") !== String(dataUser.id || "")
+        || String(sessionUser.email || "") !== String(dataUser.email || "")));
+    return freezePasswordLoginTelemetry({
+      container,
+      fields,
+      types,
+      stage: parseDiagnostic.duplicate === true || parseDiagnostic.invalid === true ? "json" : "container",
+      reason: parseDiagnostic.duplicate === true
+        ? "DUPLICATE_KEY"
+        : (parseDiagnostic.invalid === true ? "JSON_INVALID" : "PENDING"),
+      flags: {
+        duplicate: parseDiagnostic.duplicate === true,
+        mixed,
+        conflict,
+        unknown: topUnknown || dataUnknown || sessionUnknown || container === "other",
+      },
+      presence: {
+        data: hasData,
+        session: Boolean(dataValue && hasOwn(dataValue, "session")),
+        user: Boolean((sessionValue && hasOwn(sessionValue, "user")) || (dataValue && hasOwn(dataValue, "user"))),
+        error: Boolean(record && hasOwn(record, "error")),
+        weak_password: Boolean(record && hasOwn(record, "weak_password")),
+        weakPassword: Boolean(dataValue && hasOwn(dataValue, "weakPassword")),
+      },
+    });
+  }
+
+  function finishPasswordLoginTelemetry(telemetry, stage, reason) {
+    return freezePasswordLoginTelemetry({
+      ...telemetry,
+      stage,
+      reason,
+    });
+  }
+
+  function normalizePasswordLoginResponse(value, issuedAtSeconds, parseDiagnostic = {}) {
+    let telemetry = inspectPasswordLoginResponse(value, parseDiagnostic);
+    if (telemetry.flags.duplicate) {
+      return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "json", "DUPLICATE_KEY") });
+    }
+    if (parseDiagnostic.invalid === true || !isRecord(value)) {
+      return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "json", "JSON_INVALID") });
+    }
+    if (telemetry.flags.mixed) {
+      return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "container", "MIXED_CONTAINER") });
+    }
+    if (telemetry.container === "other") {
+      return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "container", "CONTAINER_UNSUPPORTED") });
+    }
+    if (telemetry.flags.unknown) {
+      return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "fields", "UNKNOWN_FIELDS") });
+    }
+    let sessionSource = null;
+    if (hasExactFields(value, PASSWORD_FLAT_RESPONSE_FIELDS, PASSWORD_SESSION_REQUIRED_FIELDS)) {
+      if (hasOwn(value, "weak_password") && !validWeakPasswordMetadata(value.weak_password)) {
+        return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "metadata", "WEAK_PASSWORD_INVALID") });
+      }
+      sessionSource = value;
+    } else if (telemetry.container === "nested") {
+      if (!hasExactFields(value, PASSWORD_NESTED_RESPONSE_FIELDS, ["data", "error"]) || value.error !== null) {
+        return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "fields", "TOP_LEVEL_FIELDS_INVALID") });
+      }
+      if (!hasExactFields(value.data, PASSWORD_NESTED_DATA_FIELDS, ["session", "user"])) {
+        return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "fields", "DATA_FIELDS_INVALID") });
+      }
+      const nestedSession = value.data.session;
+      const nestedUser = value.data.user;
+      if (!hasExactFields(nestedSession, PASSWORD_SESSION_FIELDS, PASSWORD_SESSION_REQUIRED_FIELDS)
+        || !isRecord(nestedUser)) {
+        return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "fields", "SESSION_FIELDS_INVALID") });
+      }
+      if (telemetry.flags.conflict) {
+        return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "identity", "IDENTITY_CONFLICT") });
+      }
+      if (hasOwn(value.data, "weakPassword") && !validWeakPasswordMetadata(value.data.weakPassword)) {
+        return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "metadata", "WEAK_PASSWORD_INVALID") });
+      }
+      sessionSource = nestedSession;
+    } else {
+      return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "fields", "SESSION_FIELDS_INVALID") });
+    }
+    if (!sessionSource
+      || !Number.isSafeInteger(Number(sessionSource.expires_in))
+      || Number(sessionSource.expires_in) <= 0
+      || Number(sessionSource.expires_in) > 86400
+      || String(sessionSource.token_type || "").toLowerCase() !== "bearer"
+      || !EMAIL_PATTERN.test(String(sessionSource.user?.email || ""))) {
+      return Object.freeze({ session: null, telemetry: finishPasswordLoginTelemetry(telemetry, "session", "SESSION_CORE_INVALID") });
+    }
+    const sessionValue = normalizeSession(sessionSource, issuedAtSeconds);
+    return Object.freeze({
+      session: sessionValue,
+      telemetry: finishPasswordLoginTelemetry(telemetry, sessionValue ? "accepted" : "session", sessionValue ? "ACCEPTED" : "SESSION_CORE_INVALID"),
+    });
+  }
+
+  function safeSession(session) {
+    if (!session) return null;
+    return Object.freeze({
+      user: Object.freeze({ id: session.user.id, email: session.user.email }),
+      expiresAt: session.expires_at,
+    });
+  }
+
+  function parseJsonWithUniqueObjectKeys(raw, diagnostic = null) {
+    if (typeof raw !== "string" || raw.length === 0 || raw.length > AUTH_RESPONSE_MAX_LENGTH) {
+      if (diagnostic) diagnostic.invalid = true;
+      return null;
+    }
+    let index = 0;
+
+    function skipWhitespace() {
+      while (index < raw.length && /\s/.test(raw[index])) index += 1;
+    }
+
+    function scanString() {
+      const start = index;
+      if (raw[index] !== "\"") throw new Error("JSON_STRING_REQUIRED");
+      index += 1;
+      while (index < raw.length) {
+        const character = raw[index];
+        if (character === "\"") {
+          index += 1;
+          return JSON.parse(raw.slice(start, index));
+        }
+        if (character === "\\") {
+          index += 2;
+        } else {
+          if (character.charCodeAt(0) < 32) throw new Error("JSON_CONTROL_CHARACTER");
+          index += 1;
+        }
+      }
+      throw new Error("JSON_STRING_UNTERMINATED");
+    }
+
+    function scanValue() {
+      skipWhitespace();
+      if (raw[index] === "{") {
+        index += 1;
+        skipWhitespace();
+        const keys = new Set();
+        if (raw[index] === "}") {
+          index += 1;
+          return;
+        }
+        while (index < raw.length) {
+          const key = scanString();
+          if (keys.has(key)) {
+            if (diagnostic) diagnostic.duplicate = true;
+            throw new Error("JSON_DUPLICATE_KEY");
+          }
+          keys.add(key);
+          skipWhitespace();
+          if (raw[index] !== ":") throw new Error("JSON_COLON_REQUIRED");
+          index += 1;
+          scanValue();
+          skipWhitespace();
+          if (raw[index] === "}") {
+            index += 1;
+            return;
+          }
+          if (raw[index] !== ",") throw new Error("JSON_OBJECT_DELIMITER_REQUIRED");
+          index += 1;
+          skipWhitespace();
+        }
+        throw new Error("JSON_OBJECT_UNTERMINATED");
+      }
+      if (raw[index] === "[") {
+        index += 1;
+        skipWhitespace();
+        if (raw[index] === "]") {
+          index += 1;
+          return;
+        }
+        while (index < raw.length) {
+          scanValue();
+          skipWhitespace();
+          if (raw[index] === "]") {
+            index += 1;
+            return;
+          }
+          if (raw[index] !== ",") throw new Error("JSON_ARRAY_DELIMITER_REQUIRED");
+          index += 1;
+        }
+        throw new Error("JSON_ARRAY_UNTERMINATED");
+      }
+      if (raw[index] === "\"") {
+        scanString();
+        return;
+      }
+      const start = index;
+      while (index < raw.length && !/[\s,\]}]/.test(raw[index])) index += 1;
+      if (start === index) throw new Error("JSON_VALUE_REQUIRED");
+      JSON.parse(raw.slice(start, index));
+    }
+
+    try {
+      scanValue();
+      skipWhitespace();
+      if (index !== raw.length) return null;
+      return JSON.parse(raw);
+    } catch (error) {
+      if (diagnostic) diagnostic.invalid = true;
+      return null;
+    }
+  }
+
+  async function responseJson(response, diagnostic = null) {
+    if (!response || typeof response !== "object") return null;
+    try {
+      if (typeof response.text === "function") {
+        return parseJsonWithUniqueObjectKeys(await response.text(), diagnostic);
+      }
+      return await response.json();
+    } catch (error) {
+      if (diagnostic) diagnostic.invalid = true;
+      return null;
+    }
+  }
+
+  function createSupabaseAuthProvider({ config, fetchImpl, storage, now } = {}) {
+    const projectUrl = normalizeUrl(config?.projectUrl);
+    const publishableKey = String(config?.publishableKey || "");
+    const projectRef = String(config?.expectedProjectRef || "");
+    const organizationId = String(config?.organizationId || "").toLowerCase();
+    const request = typeof fetchImpl === "function"
+      ? fetchImpl
+      : (typeof root?.fetch === "function" ? root.fetch.bind(root) : null);
+    const sessionStorage = storage !== undefined ? storage : (root?.localStorage || null);
+    const nowMs = typeof now === "function" ? now : () => Date.now();
+    const sessionKey = projectRef ? `sb-${projectRef}-auth-token` : "";
+    const pkceVerifierKey = sessionKey ? `${sessionKey}-code-verifier` : "";
+    const listeners = new Set();
+    let currentSession = null;
+    let sessionRevision = 0;
+    let refreshing = null;
+    let callbackConsumed = false;
+    let lastSessionReadStatus = "missing";
+    let lastPasswordLoginTelemetry = emptyPasswordLoginTelemetry();
+
+    function emit(event) {
+      const snapshot = safeSession(currentSession);
+      for (const listener of listeners) {
+        try {
+          listener(String(event), snapshot);
+        } catch (error) {
+          // Subscriber failures must not change Auth or sync state.
+        }
+      }
+    }
+
+    function replaceCurrentSession(sessionValue) {
+      currentSession = sessionValue || null;
+      sessionRevision += 1;
+      return currentSession;
+    }
+
+    function readStoredSession() {
+      if (!sessionStorage || !sessionKey) {
+        lastSessionReadStatus = "unavailable";
+        return null;
+      }
+      try {
+        const raw = sessionStorage.getItem(sessionKey);
+        if (!raw) {
+          lastSessionReadStatus = "missing";
+          return null;
+        }
+        const value = normalizeSession(JSON.parse(raw));
+        lastSessionReadStatus = value ? "ok" : "invalid";
+        return value;
+      } catch (error) {
+        lastSessionReadStatus = "failed";
+        return null;
+      }
+    }
+
+    function writeStoredSession(sessionValue) {
+      if (!sessionStorage || !sessionKey) return false;
+      try {
+        sessionStorage.setItem(sessionKey, JSON.stringify(sessionValue));
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function clearStoredSession() {
+      replaceCurrentSession(null);
+      if (!sessionStorage || !sessionKey) return;
+      try {
+        sessionStorage.removeItem(sessionKey);
+      } catch (error) {
+        // Storage denial already leaves the provider signed out in memory.
+      }
+    }
+
+    function sessionIsFresh(sessionValue) {
+      const nowSeconds = Math.floor(Number(nowMs()) / 1000);
+      return Boolean(sessionValue && sessionValue.expires_at > nowSeconds + SESSION_REFRESH_MARGIN_SECONDS);
+    }
+
+    function status() {
+      const snapshot = safeSession(currentSession);
+      return Object.freeze({
+        configured: Boolean(projectUrl && publishableKey && projectRef && organizationId && request && sessionStorage),
+        signedIn: Boolean(snapshot),
+        user: snapshot?.user || null,
+        expiresAt: snapshot?.expiresAt || null,
+        sessionStorageKey: sessionKey,
+        passwordLoginTelemetry: lastPasswordLoginTelemetry,
+      });
+    }
+
+    async function post(path, body, accessToken, responseDiagnostic = null) {
+      if (!request || !projectUrl || !publishableKey) return errorResult("SUPABASE_AUTH_CONFIGURATION_INVALID");
+      const headers = {
+        apikey: publishableKey,
+        "Content-Type": "application/json",
+      };
+      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+      try {
+        const response = await request(`${projectUrl}${path}`, {
+          method: "POST",
+          headers,
+          body: body === undefined ? undefined : JSON.stringify(body),
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
+          referrerPolicy: "no-referrer",
+        });
+        const value = await responseJson(response, responseDiagnostic);
+        return { ok: response.ok === true, status: Number(response.status), value };
+      } catch (error) {
+        return errorResult("SUPABASE_AUTH_NETWORK_ERROR");
+      }
+    }
+
+    async function exactAuthRequest(path, { method, body, accessToken } = {}) {
+      if (!request || !projectUrl || !publishableKey) return errorResult("SUPABASE_AUTH_CONFIGURATION_INVALID");
+      const url = `${projectUrl}${path}`;
+      const headers = { apikey: publishableKey };
+      if (body !== undefined) headers["Content-Type"] = "application/json";
+      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+      let response;
+      try {
+        response = await request(url, {
+          method: String(method || "GET"),
+          headers,
+          body: body === undefined ? undefined : JSON.stringify(body),
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
+          referrerPolicy: "no-referrer",
+        });
+      } catch (error) {
+        return errorResult("SUPABASE_AUTH_NETWORK_ERROR");
+      }
+      if (!response || response.redirected !== false || response.url !== url) {
+        return errorResult("SUPABASE_AUTH_RESPONSE_IDENTITY_INVALID");
+      }
+      const value = await responseJson(response);
+      return Object.freeze({ ok: response.ok === true, status: Number(response.status), value });
+    }
+
+    async function setSession(source) {
+      if (!isRecord(source)) return errorResult("SUPABASE_AUTH_CALLBACK_SESSION_INVALID");
+      const accessToken = String(source.access_token || "");
+      const refreshToken = String(source.refresh_token || "");
+      const nowSeconds = Math.floor(Number(nowMs()) / 1000);
+      const claims = validateMagicLinkAccessToken(accessToken, config, nowSeconds);
+      if (!claims
+        || refreshToken.length < 20
+        || refreshToken.length > TOKEN_MAX_LENGTH) {
+        return errorResult("SUPABASE_AUTH_CALLBACK_PROJECT_IDENTITY_INVALID");
+      }
+
+      const verified = await exactAuthRequest("/auth/v1/user", { method: "GET", accessToken });
+      const user = verified.ok && isRecord(verified.value) ? verified.value : null;
+      if (!user || String(user.id || "") !== String(claims.sub)) {
+        return errorResult(verified.code || "SUPABASE_AUTH_CALLBACK_USER_INVALID");
+      }
+      const sessionValue = normalizeSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        expires_at: Number(claims.exp),
+        expires_in: Math.max(0, Number(claims.exp) - nowSeconds),
+        token_type: "bearer",
+        user: {
+          id: String(user.id),
+          email: String(user.email || ""),
+        },
+      });
+      if (!sessionValue || !writeStoredSession(sessionValue)) {
+        return errorResult("SUPABASE_AUTH_SESSION_STORAGE_FAILED");
+      }
+      replaceCurrentSession(sessionValue);
+      emit("SIGNED_IN");
+      return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
+    }
+
+    function consumePkceVerifier() {
+      if (!sessionStorage || !pkceVerifierKey) return null;
+      let stored = "";
+      try {
+        stored = String(sessionStorage.getItem(pkceVerifierKey) || "");
+        sessionStorage.removeItem(pkceVerifierKey);
+      } catch (error) {
+        return null;
+      }
+      const parts = stored.split("/");
+      if (parts.length > 2
+        || !PKCE_VERIFIER_PATTERN.test(parts[0] || "")
+        || (parts.length === 2 && parts[1] !== "MAGIC_LINK")) {
+        return null;
+      }
+      return parts[0];
+    }
+
+    async function exchangeCodeForSession(authCode) {
+      const code = String(authCode || "");
+      if (!AUTH_CODE_PATTERN.test(code)) return errorResult("SUPABASE_AUTH_CALLBACK_FIELDS_INVALID");
+      const codeVerifier = consumePkceVerifier();
+      if (!codeVerifier) return errorResult("SUPABASE_AUTH_PKCE_CONTEXT_UNAVAILABLE");
+      const exchanged = await exactAuthRequest("/auth/v1/token?grant_type=pkce", {
+        method: "POST",
+        body: { auth_code: code, code_verifier: codeVerifier },
+      });
+      if (!exchanged.ok || !isRecord(exchanged.value)) {
+        return errorResult(exchanged.code || `SUPABASE_AUTH_PKCE_HTTP_${exchanged.status || 0}`);
+      }
+      const nowSeconds = Math.floor(Number(nowMs()) / 1000);
+      const claims = validateMagicLinkAccessToken(exchanged.value.access_token, config, nowSeconds);
+      const sessionValue = normalizeSession({
+        ...exchanged.value,
+        expires_at: Number(exchanged.value.expires_at || claims?.exp),
+      });
+      if (!claims) return errorResult("SUPABASE_AUTH_CALLBACK_PROJECT_IDENTITY_INVALID");
+      if (!sessionValue || sessionValue.user.id !== String(claims.sub)) {
+        return errorResult("SUPABASE_AUTH_CALLBACK_USER_INVALID");
+      }
+      if (!writeStoredSession(sessionValue)) return errorResult("SUPABASE_AUTH_SESSION_STORAGE_FAILED");
+      replaceCurrentSession(sessionValue);
+      emit("SIGNED_IN");
+      return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
+    }
+
+    async function establishMagicLinkSession(callbackSource) {
+      if (callbackConsumed) return errorResult("SUPABASE_AUTH_CALLBACK_ALREADY_CONSUMED");
+      callbackConsumed = true;
+      const parsed = parseMagicLinkCallback(callbackSource);
+      if (!parsed.ok) return Object.freeze({ ...parsed, callbackStage: "callback-shape" });
+      const result = parsed.mode === "implicit"
+        ? await setSession({ access_token: parsed.accessToken, refresh_token: parsed.refreshToken })
+        : await exchangeCodeForSession(parsed.authCode);
+      if (!result.ok) {
+        const code = String(result.code || "");
+        let callbackStage = parsed.mode === "pkce" ? "pkce" : "user-probe";
+        if (code === "SUPABASE_AUTH_CALLBACK_PROJECT_IDENTITY_INVALID") callbackStage = "project-identity";
+        else if (code === "SUPABASE_AUTH_SESSION_STORAGE_FAILED") callbackStage = "session-storage";
+        return Object.freeze({ ...result, callbackStage });
+      }
+      return Object.freeze({ ok: true, code: "", callback: parsed.mode, session: result.session });
+    }
+
+    async function refreshSession() {
+      if (refreshing) return refreshing;
+      const source = currentSession || readStoredSession();
+      if (!source?.refresh_token) {
+        clearStoredSession();
+        emit("SIGNED_OUT");
+        return errorResult("SUPABASE_AUTH_SESSION_EXPIRED");
+      }
+      const refreshRevision = sessionRevision;
+      refreshing = (async () => {
+        const response = await post("/auth/v1/token?grant_type=refresh_token", {
+          refresh_token: source.refresh_token,
+        });
+        if (sessionRevision !== refreshRevision) {
+          return currentSession
+            ? Object.freeze({ ok: true, code: "", session: safeSession(currentSession), superseded: true })
+            : errorResult("SUPABASE_AUTH_SESSION_SUPERSEDED");
+        }
+        const renewed = response.ok
+          ? normalizeSession(response.value, Math.floor(Number(nowMs()) / 1000))
+          : null;
+        if (!renewed || !writeStoredSession(renewed)) {
+          clearStoredSession();
+          emit("SIGNED_OUT");
+          return errorResult("SUPABASE_AUTH_SESSION_EXPIRED");
+        }
+        replaceCurrentSession(renewed);
+        emit("TOKEN_REFRESHED");
+        return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
+      })();
+      try {
+        return await refreshing;
+      } finally {
+        refreshing = null;
+      }
+    }
+
+    async function restoreSession() {
+      const stored = readStoredSession();
+      if (!stored) {
+        clearStoredSession();
+        emit("INITIAL_SESSION");
+        return errorResult(["invalid", "failed", "unavailable"].includes(lastSessionReadStatus)
+          ? "SUPABASE_AUTH_SESSION_STORAGE_FAILED"
+          : "SUPABASE_AUTH_SIGNED_OUT");
+      }
+      replaceCurrentSession(stored);
+      if (!sessionIsFresh(currentSession)) return refreshSession();
+      emit("INITIAL_SESSION");
+      return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
+    }
+
+    async function signInWithPassword(email, password) {
+      lastPasswordLoginTelemetry = emptyPasswordLoginTelemetry();
+      const normalizedEmail = String(email || "").trim().toLowerCase();
+      const suppliedPassword = String(password || "");
+      if (!EMAIL_PATTERN.test(normalizedEmail) || suppliedPassword.length < 8) {
+        return errorResult("SUPABASE_AUTH_CREDENTIAL_INPUT_INVALID");
+      }
+      const parseDiagnostic = { duplicate: false, invalid: false };
+      const response = await post("/auth/v1/token?grant_type=password", {
+        email: normalizedEmail,
+        password: suppliedPassword,
+      }, undefined, parseDiagnostic);
+      const normalized = response.ok
+        ? normalizePasswordLoginResponse(response.value, Math.floor(Number(nowMs()) / 1000), parseDiagnostic)
+        : Object.freeze({
+            session: null,
+            telemetry: finishPasswordLoginTelemetry(emptyPasswordLoginTelemetry(), "container", "HTTP_REJECTED"),
+          });
+      lastPasswordLoginTelemetry = normalized.telemetry;
+      const signedInSession = normalized.session;
+      if (!signedInSession) {
+        clearStoredSession();
+        emit("SIGNED_OUT");
+        return errorResult(response.ok
+          ? "SUPABASE_AUTH_LOGIN_RESPONSE_INVALID"
+          : (response.code || `SUPABASE_AUTH_HTTP_${response.status || 0}`));
+      }
+      if (!writeStoredSession(signedInSession)) {
+        clearStoredSession();
+        emit("SIGNED_OUT");
+        return errorResult("SUPABASE_AUTH_SESSION_STORAGE_FAILED");
+      }
+      replaceCurrentSession(signedInSession);
+      emit("SIGNED_IN");
+      return Object.freeze({ ok: true, code: "", session: safeSession(currentSession) });
+    }
+
+    async function getAccessToken() {
+      if (!currentSession) replaceCurrentSession(readStoredSession());
+      if (!currentSession) return "";
+      if (!sessionIsFresh(currentSession)) {
+        const refreshed = await refreshSession();
+        if (!refreshed.ok) return "";
+      }
+      return String(currentSession?.access_token || "");
+    }
+
+    async function verifyOwnerMembership() {
+      const accessToken = await getAccessToken();
+      if (!accessToken) return errorResult("SUPABASE_AUTH_SIGNED_OUT");
+      const response = await post("/rest/v1/rpc/get_my_app_context", {
+        p_organization_id: organizationId,
+      }, accessToken);
+      if (!response.ok) {
+        if (response.status === 401) return errorResult("SUPABASE_AUTH_TOKEN_EXPIRED");
+        if (response.status === 403) return errorResult("SUPABASE_AUTH_OWNER_REQUIRED");
+        return errorResult(response.code || `SUPABASE_AUTH_OWNER_GATE_HTTP_${response.status || 0}`);
+      }
+      const value = response.value && typeof response.value === "object" ? response.value : null;
+      if (!value || value.ok !== true) return errorResult("SUPABASE_AUTH_MEMBERSHIP_INVALID");
+      if (String(value.organization_id || "").toLowerCase() !== organizationId) {
+        return errorResult("SUPABASE_AUTH_ORGANIZATION_MISMATCH");
+      }
+      if (String(value.role || "") !== "owner") return errorResult("SUPABASE_AUTH_OWNER_REQUIRED");
+      return Object.freeze({ ok: true, code: "", role: "owner", organizationId });
+    }
+
+    async function bootstrapFirstOwner() {
+      const accessToken = await getAccessToken();
+      if (!accessToken) return errorResult("SUPABASE_AUTH_SIGNED_OUT");
+      const response = await post("/rest/v1/rpc/bootstrap_authenticated_first_owner_v1", {}, accessToken);
+      if (!response.ok) {
+        if (response.status === 401) return errorResult("SUPABASE_AUTH_TOKEN_EXPIRED");
+        if (response.status === 403) return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_DENIED");
+        return errorResult(`SUPABASE_AUTH_OWNER_BOOTSTRAP_HTTP_${response.status || 0}`);
+      }
+      const value = response.value && typeof response.value === "object" ? response.value : null;
+      if (!value || value.ok !== true) {
+        const code = String(value?.code || "");
+        if (code === "BOOTSTRAP_CLOSED") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_CLOSED");
+        if (code === "AUTH_REQUIRED") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_AUTH_REQUIRED");
+        if (code === "AUTH_EMAIL_REQUIRED") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_EMAIL_REQUIRED");
+        if (code === "ORGANIZATION_NOT_FOUND") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_ORGANIZATION_NOT_FOUND");
+        return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_RESULT_INVALID");
+      }
+      if (String(value.organization_id || "").toLowerCase() !== organizationId
+        || String(value.role || "") !== "owner") {
+        return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_RESULT_INVALID");
+      }
+      return Object.freeze({ ok: true, code: "", role: "owner", organizationId });
+    }
+
+    async function signOut() {
+      if (!currentSession) replaceCurrentSession(readStoredSession());
+      const accessToken = currentSession?.access_token || "";
+      let remoteOk = true;
+      if (accessToken) {
+        const response = await post("/auth/v1/logout?scope=local", undefined, accessToken);
+        remoteOk = response.ok === true || response.status === 401;
+      }
+      clearStoredSession();
+      emit("SIGNED_OUT");
+      return remoteOk
+        ? Object.freeze({ ok: true, code: "" })
+        : errorResult("SUPABASE_AUTH_LOGOUT_REMOTE_FAILED");
+    }
+
+    function onAuthStateChange(callback) {
+      if (typeof callback !== "function") return Object.freeze({ unsubscribe() {} });
+      listeners.add(callback);
+      return Object.freeze({ unsubscribe: () => listeners.delete(callback) });
+    }
+
+    return Object.freeze({
+      signInWithPassword,
+      setSession,
+      exchangeCodeForSession,
+      establishMagicLinkSession,
+      signOut,
+      restoreSession,
+      refreshSession,
+      getAccessToken,
+      verifyOwnerMembership,
+      bootstrapFirstOwner,
+      onAuthStateChange,
+      status,
+      sessionStorageKey: sessionKey,
+    });
+  }
+
+  function createUnavailableProvider(code) {
+    const unavailable = () => Promise.resolve(errorResult(code));
+    return Object.freeze({
+      signInWithPassword: unavailable,
+      setSession: unavailable,
+      exchangeCodeForSession: unavailable,
+      establishMagicLinkSession: unavailable,
+      signOut: unavailable,
+      restoreSession: unavailable,
+      refreshSession: unavailable,
+      getAccessToken: async () => "",
+      verifyOwnerMembership: unavailable,
+      bootstrapFirstOwner: unavailable,
+      onAuthStateChange: () => Object.freeze({ unsubscribe() {} }),
+      status: () => Object.freeze({
+        configured: false,
+        signedIn: false,
+        user: null,
+        expiresAt: null,
+        sessionStorageKey: "",
+        passwordLoginTelemetry: emptyPasswordLoginTelemetry(),
+      }),
+      sessionStorageKey: "",
+    });
+  }
+
+  function createRuntimeAuthIntegration({ config, authProvider, configApi, fetchImpl, eventTarget, callbackDiagnosticStorage, callbackTelemetryPublisher, passwordLoginTelemetryPublisher, initialCallbackTelemetry } = {}) {
+    const provider = authProvider || createUnavailableProvider("SUPABASE_PUBLIC_CONFIG_REQUIRED");
+    const publicConfig = config && typeof config === "object" ? config : null;
+    const target = eventTarget || null;
+    const callbackDiagnostics = createCallbackDiagnosticStore(callbackDiagnosticStorage);
+    let ownerVerified = false;
+    let authorizationPhase = "idle";
+    let ownerBootstrapPhase = "idle";
+    let lastCode = publicConfig ? "SUPABASE_AUTH_SIGNED_OUT" : "SUPABASE_PUBLIC_CONFIG_REQUIRED";
+    let loginStage = "idle";
+    let callbackStage = "";
+    let callbackTelemetry = initialCallbackTelemetry
+      ? normalizeCallbackTelemetry(initialCallbackTelemetry)
+      : emptyCallbackTelemetry();
+    let passwordLoginTelemetry = emptyPasswordLoginTelemetry();
+    let lastPushResult = null;
+    let authTransitionRevision = 0;
+    let initializeRevision = 0;
+
+    function syncConfiguration(enabled = authorizationPhase === "authorized" || authorizationPhase === "in-flight") {
+      if (!publicConfig) {
+        return Object.freeze({ enabled: false, mode: "local-only", code: "SUPABASE_PUBLIC_CONFIG_REQUIRED", expectedPreviousRevision: 0 });
+      }
+      return Object.freeze({
+        enabled: enabled === true,
+        mode: enabled === true ? "push-only" : "local-only",
+        code: enabled === true ? "" : lastCode || "SUPABASE_FORMAL_PUSH_NOT_AUTHORIZED",
+        url: String(publicConfig.projectUrl || ""),
+        anonKey: String(publicConfig.publishableKey || ""),
+        organizationId: String(publicConfig.organizationId || ""),
+        organizationSlug: String(publicConfig.organizationSlug || ""),
+        expectedPreviousRevision: Number(publicConfig.expectedPreviousRevision),
+        getAccessToken: provider.getAccessToken,
+        fetchImpl: typeof fetchImpl === "function" ? fetchImpl : undefined,
+      });
+    }
+
+    function publicStatus() {
+      const auth = provider.status();
+      const canBootstrapFirstOwner = Boolean(
+        publicConfig
+        && auth.signedIn
+        && !ownerVerified
+        && ownerBootstrapPhase === "idle"
+        && lastCode === "SUPABASE_AUTH_MEMBERSHIP_INVALID"
+      );
+      return Object.freeze({
+        configured: Boolean(publicConfig && auth.configured),
+        configCode: publicConfig ? "" : "SUPABASE_PUBLIC_CONFIG_REQUIRED",
+        signedIn: auth.signedIn === true,
+        user: auth.user || null,
+        ownerVerified,
+        formalAuthorized: authorizationPhase === "authorized",
+        phase: authorizationPhase,
+        canAuthorize: Boolean(publicConfig && auth.signedIn && ownerVerified && authorizationPhase === "idle"),
+        canPush: Boolean(publicConfig && auth.signedIn && ownerVerified && authorizationPhase === "authorized"),
+        canBootstrapFirstOwner,
+        ownerBootstrapPhase,
+        code: String(lastCode || ""),
+        loginStage,
+        callbackStage,
+        callbackTelemetry,
+        passwordLoginTelemetry,
+        lastPushOk: lastPushResult?.ok === true,
+      });
+    }
+
+    function publish() {
+      const facade = syncConfiguration();
+      if (configApi && typeof configApi.publishSyncFacade === "function") configApi.publishSyncFacade(facade);
+      const status = publicStatus();
+      if (typeof callbackTelemetryPublisher === "function") {
+        try {
+          callbackTelemetryPublisher(status.callbackTelemetry, status);
+        } catch (error) {
+          // Diagnostic rendering cannot alter Auth or authorization state.
+        }
+      }
+      if (typeof passwordLoginTelemetryPublisher === "function") {
+        try {
+          passwordLoginTelemetryPublisher(status.passwordLoginTelemetry, status);
+        } catch (error) {
+          // Diagnostic rendering cannot alter Auth or authorization state.
+        }
+      }
+      if (target && typeof target.dispatchEvent === "function" && typeof root?.CustomEvent === "function") {
+        try {
+          target.dispatchEvent(new root.CustomEvent("materials-quote-supabase-auth-change", { detail: status }));
+        } catch (error) {
+          // A UI notification failure must not alter authorization.
+        }
+      }
+      return status;
+    }
+
+    async function initialize(callbackSource = null) {
+      const transitionAtStart = authTransitionRevision;
+      const currentInitializeRevision = ++initializeRevision;
+      const hadCallback = Boolean(callbackSource);
+      callbackTelemetry = hadCallback
+        ? normalizeCallbackTelemetry(callbackSource?.telemetry)
+        : emptyCallbackTelemetry();
+      const restored = callbackSource
+        ? await provider.establishMagicLinkSession(callbackSource)
+        : await provider.restoreSession();
+      if (transitionAtStart !== authTransitionRevision || currentInitializeRevision !== initializeRevision) {
+        return restored;
+      }
+      ownerVerified = false;
+      authorizationPhase = "idle";
+      if (hadCallback) {
+        const diagnostic = callbackDiagnostics.write(callbackDiagnosticForResult(callbackSource, restored));
+        lastCode = diagnostic.code;
+        callbackStage = diagnostic.stage;
+        callbackTelemetry = finalizeCallbackTelemetry(callbackTelemetry, diagnostic, restored);
+      } else if (!restored.ok) {
+        const previous = callbackDiagnostics.read();
+        const diagnostic = previous || callbackDiagnostics.write(
+          restored.code === "SUPABASE_AUTH_SESSION_STORAGE_FAILED"
+            ? CALLBACK_DIAGNOSTIC_STATUSES.storage
+            : CALLBACK_DIAGNOSTIC_STATUSES.noCallback,
+        );
+        lastCode = diagnostic.code;
+        callbackStage = diagnostic.stage;
+      } else {
+        lastCode = "SUPABASE_AUTH_OWNER_GATE_REQUIRED";
+        callbackStage = "";
+      }
+      publish();
+      return restored;
+    }
+
+    async function signInWithPassword(email, password) {
+      authTransitionRevision += 1;
+      callbackDiagnostics.clear();
+      callbackStage = "";
+      callbackTelemetry = emptyCallbackTelemetry();
+      passwordLoginTelemetry = emptyPasswordLoginTelemetry();
+      authorizationPhase = "idle";
+      ownerVerified = false;
+      if (ownerBootstrapPhase !== "consumed") ownerBootstrapPhase = "idle";
+      lastPushResult = null;
+      loginStage = "request-pending";
+      publish();
+      const signedIn = await provider.signInWithPassword(email, password);
+      passwordLoginTelemetry = normalizePasswordLoginTelemetry(provider.status().passwordLoginTelemetry);
+      if (!signedIn.ok) {
+        lastCode = signedIn.code;
+        loginStage = signedIn.code === "SUPABASE_AUTH_LOGIN_RESPONSE_INVALID"
+          ? "response-invalid"
+          : (signedIn.code === "SUPABASE_AUTH_SESSION_STORAGE_FAILED" ? "storage-rejected" : "request-rejected");
+        publish();
+        return signedIn;
+      }
+      loginStage = "session-established";
+      publish();
+      const gate = await verifyOwnerMembership();
+      loginStage = "owner-gate-complete";
+      publish();
+      return gate.ok ? signedIn : gate;
+    }
+
+    async function signOut() {
+      authTransitionRevision += 1;
+      callbackDiagnostics.clear();
+      callbackStage = "";
+      loginStage = "idle";
+      passwordLoginTelemetry = emptyPasswordLoginTelemetry();
+      lastCode = "SUPABASE_AUTH_SIGNED_OUT";
+      authorizationPhase = "idle";
+      ownerVerified = false;
+      lastPushResult = null;
+      const result = await provider.signOut();
+      lastCode = result.ok ? "SUPABASE_AUTH_SIGNED_OUT" : result.code;
+      publish();
+      return result;
+    }
+
+    async function verifyOwnerMembership() {
+      if (!publicConfig) {
+        lastCode = "SUPABASE_PUBLIC_CONFIG_REQUIRED";
+        ownerVerified = false;
+        publish();
+        return errorResult(lastCode);
+      }
+      const gate = await provider.verifyOwnerMembership();
+      ownerVerified = gate.ok === true;
+      lastCode = gate.ok ? "SUPABASE_FORMAL_PUSH_CONFIRMATION_REQUIRED" : gate.code;
+      if (!gate.ok) authorizationPhase = authorizationPhase === "consumed" ? "consumed" : "idle";
+      publish();
+      return gate;
+    }
+
+    async function bootstrapFirstOwner() {
+      const auth = provider.status();
+      if (!publicConfig) return errorResult("SUPABASE_PUBLIC_CONFIG_REQUIRED");
+      if (!auth.signedIn) return errorResult("SUPABASE_AUTH_SIGNED_OUT");
+      if (ownerBootstrapPhase === "in-flight") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_IN_FLIGHT");
+      if (ownerBootstrapPhase === "consumed") return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_ALREADY_CONSUMED");
+      if (ownerVerified || lastCode !== "SUPABASE_AUTH_MEMBERSHIP_INVALID") {
+        return errorResult("SUPABASE_AUTH_OWNER_BOOTSTRAP_NOT_AVAILABLE");
+      }
+      ownerBootstrapPhase = "in-flight";
+      lastCode = "SUPABASE_AUTH_OWNER_BOOTSTRAP_IN_FLIGHT";
+      publish();
+      const created = await provider.bootstrapFirstOwner();
+      ownerBootstrapPhase = "consumed";
+      if (!created.ok) {
+        ownerVerified = false;
+        lastCode = created.code;
+        publish();
+        return created;
+      }
+      const gate = await provider.verifyOwnerMembership();
+      ownerVerified = gate.ok === true;
+      lastCode = gate.ok
+        ? "SUPABASE_FORMAL_PUSH_CONFIRMATION_REQUIRED"
+        : "SUPABASE_AUTH_OWNER_BOOTSTRAP_POSTCHECK_FAILED";
+      publish();
+      return gate.ok
+        ? Object.freeze({ ok: true, code: "", role: "owner", organizationId: String(publicConfig.organizationId || "") })
+        : errorResult(lastCode);
+    }
+
+    async function authorizeFormalPushOnce({ confirmation, artifactGatesAccepted } = {}) {
+      if (authorizationPhase === "in-flight") return errorResult("SUPABASE_FORMAL_PUSH_IN_FLIGHT");
+      if (authorizationPhase === "consumed") return errorResult("SUPABASE_FORMAL_PUSH_ALREADY_CONSUMED");
+      if (!publicConfig) return errorResult("SUPABASE_PUBLIC_CONFIG_REQUIRED");
+      if (confirmation !== FORMAL_PUSH_CONFIRMATION || artifactGatesAccepted !== true) {
+        lastCode = "SUPABASE_FORMAL_PUSH_CONFIRMATION_REQUIRED";
+        publish();
+        return errorResult(lastCode);
+      }
+      const gate = await verifyOwnerMembership();
+      if (!gate.ok) return gate;
+      authorizationPhase = "authorized";
+      lastCode = "";
+      lastPushResult = null;
+      publish();
+      return Object.freeze({ ok: true, code: "" });
+    }
+
+    async function executeFormalPush(push) {
+      if (authorizationPhase === "in-flight") return errorResult("SUPABASE_FORMAL_PUSH_IN_FLIGHT");
+      if (authorizationPhase === "consumed") return errorResult("SUPABASE_FORMAL_PUSH_ALREADY_CONSUMED");
+      if (authorizationPhase !== "authorized" || typeof push !== "function") {
+        return errorResult("SUPABASE_FORMAL_PUSH_NOT_AUTHORIZED");
+      }
+      authorizationPhase = "in-flight";
+      lastCode = "";
+      publish();
+      const gate = await provider.verifyOwnerMembership();
+      ownerVerified = gate.ok === true;
+      if (!gate.ok) {
+        authorizationPhase = "consumed";
+        lastCode = gate.code;
+        lastPushResult = gate;
+        publish();
+        return gate;
+      }
+      let result;
+      try {
+        result = await push();
+      } catch (error) {
+        result = errorResult("SUPABASE_FORMAL_PUSH_FAILED");
+      }
+      if (!result || typeof result !== "object") result = errorResult("SUPABASE_FORMAL_PUSH_RESULT_INVALID");
+      authorizationPhase = "consumed";
+      lastCode = result.ok ? "" : String(result.code || "SUPABASE_FORMAL_PUSH_FAILED");
+      lastPushResult = result;
+      publish();
+      return result;
+    }
+
+    provider.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        ownerVerified = false;
+        if (authorizationPhase !== "consumed") authorizationPhase = "idle";
+        const diagnostic = CALLBACK_DIAGNOSTIC_BY_CODE.get(lastCode);
+        if (!diagnostic || diagnostic === CALLBACK_DIAGNOSTIC_STATUSES.success) {
+          lastCode = "SUPABASE_AUTH_SIGNED_OUT";
+          callbackStage = "";
+        }
+      }
+      publish();
+    });
+
+    publish();
+
+    return Object.freeze({
+      initialize,
+      signInWithPassword,
+      signOut,
+      verifyOwnerMembership,
+      bootstrapFirstOwner,
+      authorizeFormalPushOnce,
+      executeFormalPush,
+      getSyncConfiguration: syncConfiguration,
+      status: publicStatus,
+      authProvider: provider,
+    });
+  }
+
+  function ensureGlobalAuthDiagnosticNode(browserRoot) {
+    const document = browserRoot?.document;
+    if (!document || typeof document.getElementById !== "function") return null;
+    let node = document.getElementById(GLOBAL_AUTH_DIAGNOSTIC_NODE_ID);
+    if (node) return node;
+    if (typeof document.createElement !== "function") return null;
+    node = document.createElement("meta");
+    node.id = GLOBAL_AUTH_DIAGNOSTIC_NODE_ID;
+    node.hidden = true;
+    node.setAttribute("data-supabase-auth-global-diagnostic", "");
+    const parent = document.head || document.documentElement;
+    if (!parent || typeof parent.appendChild !== "function") return null;
+    parent.appendChild(node);
+    return node;
+  }
+
+  function writeGlobalPasswordLoginTelemetry(browserRoot, telemetry) {
+    const node = ensureGlobalAuthDiagnosticNode(browserRoot);
+    if (!node || typeof node.setAttribute !== "function") return false;
+    const safe = normalizePasswordLoginTelemetry(telemetry);
+    const list = (group, scope) => safe[group][scope].join(",");
+    const boolean = (value) => value === true ? "1" : "0";
+    node.setAttribute("data-supabase-auth-password-response-container", safe.container);
+    node.setAttribute("data-supabase-auth-password-response-stage", safe.stage);
+    node.setAttribute("data-supabase-auth-password-response-reason", safe.reason);
+    for (const scope of PASSWORD_TELEMETRY_SCOPES) {
+      const attributeScope = scope === "topLevel" ? "top" : scope;
+      node.setAttribute(`data-supabase-auth-password-response-${attributeScope}-fields`, list("fields", scope));
+      node.setAttribute(`data-supabase-auth-password-response-${attributeScope}-types`, list("types", scope));
+    }
+    for (const name of ["duplicate", "mixed", "conflict", "unknown"]) {
+      node.setAttribute(`data-supabase-auth-password-response-${name}`, boolean(safe.flags[name]));
+    }
+    for (const name of ["data", "session", "user", "error", "weak_password", "weakPassword"]) {
+      node.setAttribute(`data-supabase-auth-password-response-has-${name.replace(/_/g, "-")}`, boolean(safe.presence[name]));
+    }
+    return true;
+  }
+
+  function bootstrapBrowserRuntime(browserRoot = root) {
+    if (!browserRoot || browserRoot.MaterialsQuoteSupabaseRuntime) return browserRoot?.MaterialsQuoteSupabaseRuntime || null;
+    const configApi = browserRoot.MaterialsQuoteSupabaseRuntimeConfig;
+    const config = configApi?.getCurrentConfiguration?.() || null;
+    const fetchImpl = typeof browserRoot.fetch === "function" ? browserRoot.fetch.bind(browserRoot) : null;
+    let browserStorage = null;
+    let callbackDiagnosticStorage = null;
+    try {
+      browserStorage = browserRoot.localStorage;
+    } catch (error) {
+      browserStorage = null;
+    }
+    try {
+      callbackDiagnosticStorage = browserRoot.sessionStorage;
+    } catch (error) {
+      callbackDiagnosticStorage = null;
+    }
+    let callbackSource = browserRoot.MaterialsQuoteSupabaseAuthCallback || null;
+    const provider = config
+      ? createSupabaseAuthProvider({ config, fetchImpl, storage: browserStorage })
+      : createUnavailableProvider(configApi?.status?.().code || "SUPABASE_PUBLIC_CONFIG_REQUIRED");
+    const integration = createRuntimeAuthIntegration({
+      config,
+      authProvider: provider,
+      configApi,
+      fetchImpl,
+      eventTarget: browserRoot,
+      callbackDiagnosticStorage,
+      initialCallbackTelemetry: callbackSource?.telemetry || null,
+      callbackTelemetryPublisher: (telemetry, status) => {
+        const bridge = browserRoot.MaterialsQuoteSupabaseAuthCallbackBridge;
+        if (bridge && typeof bridge.writeGlobalTelemetry === "function") {
+          bridge.writeGlobalTelemetry(browserRoot, telemetry, status?.signedIn === true ? "signed-in" : "signed-out");
+        }
+      },
+      passwordLoginTelemetryPublisher: (telemetry) => {
+        writeGlobalPasswordLoginTelemetry(browserRoot, telemetry);
+      },
+    });
+    browserRoot.MaterialsQuoteSupabaseRuntime = integration;
+    browserRoot.MaterialsQuoteSupabaseSyncConfig = integration.getSyncConfiguration();
+    try {
+      delete browserRoot.MaterialsQuoteSupabaseAuthCallback;
+    } catch (error) {
+      try {
+        browserRoot.MaterialsQuoteSupabaseAuthCallback = null;
+      } catch (ignored) {
+        // The provider still enforces a single callback consumption.
+      }
+    }
+    Promise.resolve(integration.initialize(callbackSource)).then((result) => {
+      callbackSource = null;
+      if (result?.ok === true && result.callback && browserRoot.location) {
+        browserRoot.location.hash = "#/settings/company";
+      }
+    });
+    if (config && typeof browserRoot.addEventListener === "function") {
+      browserRoot.addEventListener("storage", (event) => {
+        if (event?.key === provider.sessionStorageKey) integration.initialize();
+      });
+    }
+    return integration;
+  }
+
+  return Object.freeze({
+    FORMAL_PUSH_CONFIRMATION,
+    AUTH_RUNTIME_VERSION,
+    MAGIC_LINK_CALLBACK_URL,
+    MAGIC_LINK_CALLBACK_URLS,
+    CALLBACK_DIAGNOSTIC_STORAGE_KEY,
+    CALLBACK_DIAGNOSTIC_STATUSES,
+    emptyPasswordLoginTelemetry,
+    writeGlobalPasswordLoginTelemetry,
+    parseMagicLinkCallback,
+    validateMagicLinkAccessToken,
+    createSupabaseAuthProvider,
+    createRuntimeAuthIntegration,
+    bootstrapBrowserRuntime,
+  });
+});
