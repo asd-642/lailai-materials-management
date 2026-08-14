@@ -7,7 +7,7 @@
   "use strict";
 
   const FORMAL_PUSH_CONFIRMATION = "啟用唯一正式推送";
-  const AUTH_RUNTIME_VERSION = "20260813-password-login-official-access-token-response-001";
+  const AUTH_RUNTIME_VERSION = "20260814-refresh-token-opaque-compat-001";
   const SESSION_REFRESH_MARGIN_SECONDS = 60;
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const MAGIC_LINK_CALLBACK_ROOT_URL = "https://asd-642.github.io/lailai-materials-management/";
@@ -506,7 +506,7 @@
       || expiresIn > 86400
       || (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt < 1))
       || String(values.access_token).length > TOKEN_MAX_LENGTH
-      || String(values.refresh_token).length < 20
+      || String(values.refresh_token).length < 1
       || String(values.refresh_token).length > TOKEN_MAX_LENGTH) {
       return errorResult("SUPABASE_AUTH_CALLBACK_SESSION_INVALID");
     }
@@ -579,7 +579,7 @@
     const tokenType = String(source.token_type || "").toLowerCase();
     if (accessToken.length < 32
       || accessToken.length > TOKEN_MAX_LENGTH
-      || refreshToken.length < 20
+      || refreshToken.length < 1
       || refreshToken.length > TOKEN_MAX_LENGTH
       || tokenType !== "bearer"
       || !Number.isSafeInteger(expiresIn)
@@ -1025,7 +1025,7 @@
       const nowSeconds = Math.floor(Number(nowMs()) / 1000);
       const claims = validateMagicLinkAccessToken(accessToken, config, nowSeconds);
       if (!claims
-        || refreshToken.length < 20
+        || refreshToken.length < 1
         || refreshToken.length > TOKEN_MAX_LENGTH) {
         return errorResult("SUPABASE_AUTH_CALLBACK_PROJECT_IDENTITY_INVALID");
       }

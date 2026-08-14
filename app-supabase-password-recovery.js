@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.2 seconds
-Output:
 (function (root, factory) {
   const api = factory(root);
   if (typeof module === "object" && module.exports) module.exports = api;
@@ -9,7 +6,7 @@ Output:
 })(typeof globalThis !== "undefined" ? globalThis : this, function (root) {
   "use strict";
 
-  const RECOVERY_RUNTIME_VERSION = "20260813-server-validated-recovery-session-001";
+  const RECOVERY_RUNTIME_VERSION = "20260814-refresh-token-opaque-compat-001";
   const FORMAL_SITE_BASE_URL = "https://asd-642.github.io/lailai-materials-management/";
   const PASSWORD_RECOVERY_REDIRECT_URL = `${FORMAL_SITE_BASE_URL}supabase-password-recovery.html`;
   const PASSWORD_RECOVERY_SUCCESS_URL = `${FORMAL_SITE_BASE_URL}index.html#/login`;
@@ -17,7 +14,7 @@ Output:
   const PASSWORD_MAX_LENGTH = 128;
   const EMAIL_MAX_LENGTH = 254;
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  const RECOVERY_REQUEST_NEUTRAL_MESSAGE = "?亙董???剁?隢???圈?閮凋縑";
+  const RECOVERY_REQUEST_NEUTRAL_MESSAGE = "若帳號存在，請查看最新重設信";
   const CALLBACK_MAX_LENGTH = 16384;
   const TOKEN_MAX_LENGTH = 8192;
   const PROJECT_REF_PATTERN = /^[a-z0-9]{20}$/;
@@ -191,7 +188,7 @@ Output:
       || expiresIn > 86400
       || (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt < 1))
       || String(values.access_token).length > TOKEN_MAX_LENGTH
-      || String(values.refresh_token).length < 20
+      || String(values.refresh_token).length < 1
       || String(values.refresh_token).length > TOKEN_MAX_LENGTH) {
       return resultError("SUPABASE_RECOVERY_SESSION_INVALID");
     }
@@ -340,7 +337,7 @@ Output:
       const token = String(source.access_token || "");
       const refreshToken = String(source.refresh_token || "");
       const currentSeconds = Math.floor(Number(nowMs()) / 1000);
-      if (refreshToken.length < 20
+      if (refreshToken.length < 1
         || refreshToken.length > TOKEN_MAX_LENGTH
         || !validateRecoveryAccessToken(token, config, currentSeconds)) {
         return false;
@@ -369,7 +366,7 @@ Output:
       const refreshToken = String(session.refresh_token || "");
       if (token.length < 32
         || token.length > TOKEN_MAX_LENGTH
-        || refreshToken.length < 20
+        || refreshToken.length < 1
         || refreshToken.length > TOKEN_MAX_LENGTH
         || /[\u0000-\u001F\u007F]/.test(token)
         || /[\u0000-\u001F\u007F]/.test(refreshToken)) {
@@ -548,15 +545,15 @@ Output:
     function render(state) {
       if (!statusNode || !form || !requestForm) return;
       const messages = {
-        validating: "甇?撽?撖Ⅳ?身?????,
-        ready: "???撌脤?霅?頛詨?啁? Supabase 撣唾?撖Ⅳ??,
-        updating: "甇?摰?湔撖Ⅳ??,
-        success: "撖Ⅳ撌脫?堆?甇?餈?甇??蝬脩??餃??,
-        invalid: "甇文?蝣潮?閮剝???⊥?嚗?脰?隞颱?霈??,
-        "update-failed": "撖Ⅳ?湔憭望???蝣箄?撖Ⅳ閬?敺?閰虫?甈～?,
-        request: "隢撓??Supabase 撣唾? Email 隞亙?敺??蝣潮?閮凋縑??,
-        "request-input-error": "隢撓?交??? Supabase 撣唾? Email??,
-        "request-pending": "甇??撖Ⅳ?身閬???,
+        validating: "正在驗證密碼重設連結…",
+        ready: "連結已驗證。請輸入新的 Supabase 帳號密碼。",
+        updating: "正在安全更新密碼…",
+        success: "密碼已更新，正在返回正式網站登入頁。",
+        invalid: "此密碼重設連結無效，未進行任何變更。",
+        "update-failed": "密碼更新失敗。請確認密碼規則後再試一次。",
+        request: "請輸入 Supabase 帳號 Email 以取得新的密碼重設信。",
+        "request-input-error": "請輸入有效的 Supabase 帳號 Email。",
+        "request-pending": "正在送出密碼重設要求…",
         "request-complete": RECOVERY_REQUEST_NEUTRAL_MESSAGE,
       };
       statusNode.textContent = messages[state] || messages.invalid;

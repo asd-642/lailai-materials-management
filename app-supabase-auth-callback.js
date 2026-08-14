@@ -24,7 +24,7 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
-  const AUTH_CALLBACK_BRIDGE_VERSION = "20260813-recovery-global-telemetry-001";
+  const AUTH_CALLBACK_BRIDGE_VERSION = "20260814-refresh-token-opaque-compat-001";
   const CALLBACK_MAX_LENGTH = 16384;
   const TOKEN_MAX_LENGTH = 8192;
   const FORMAL_ORIGIN = "https://asd-642.github.io";
@@ -263,7 +263,7 @@
       || values.type !== "recovery"
       || String(values.token_type).toLowerCase() !== "bearer"
       || String(values.access_token).length < 32
-      || String(values.refresh_token).length < 20) return "";
+      || String(values.refresh_token).length < 1) return "";
     const expiresIn = Number(values.expires_in);
     const expiresAt = Object.prototype.hasOwnProperty.call(values, "expires_at") ? Number(values.expires_at) : null;
     if (!Number.isSafeInteger(expiresIn)
