@@ -245,6 +245,7 @@ function calcLine(label, value) {
 function renderMaterials() {
   const params = route().query;
   const canEdit = canEditMaterialPrices();
+  const sourceWorkflow = window.MaterialSourceWorkflow;
   const q = params.get("q") || "";
   const includeInactive = params.get("inactive") === "1";
   const selectedCategories = Array.from(new Set(params.getAll("category").filter(Boolean)));
@@ -268,11 +269,12 @@ function renderMaterials() {
       item.catalog_application,
       item.catalog_marks,
       item.notes,
+      sourceWorkflow?.materialSourceSearchText?.(item),
     ].filter(Boolean).join(" ").toLowerCase();
     const prices = materialComparablePrices(item, activePriceBases);
     const priceInRange = min == null && max == null ? true : prices.some((price) => (min == null || price >= min) && (max == null || price <= max));
     return (
-      (includeInactive || item.is_active) &&
+      (includeInactive || item.is_active || sourceWorkflow?.materialSourceReviewStatus?.(item) === "review_required") &&
       text.includes(q.toLowerCase()) &&
       (!selectedCategories.length || selectedCategories.includes(item.category)) &&
       priceInRange
@@ -294,7 +296,7 @@ function renderMaterials() {
   return `
     ${pageHead("材料庫", `共 ${rows.length} 項材料`, canEdit ? `<a class="btn" href="${link("/materials/new")}">＋ 新增材料</a>` : "")}
     <form class="toolbar material-toolbar" onsubmit="searchMaterials(event)">
-      <input class="input" style="max-width:320px" name="q" value="${h(q)}" placeholder="搜尋名稱、料號、分類…">
+      <input class="input" style="max-width:420px" name="q" value="${h(q)}" placeholder="搜尋名稱、料號、型號、尺寸、花色、分類…">
       ${renderMaterialFilterPopover({ categories, categoryError: categoryResult?.ok ? "" : categoryResult?.error || "材料分類目前無法讀取", canEdit, selectedCategories, selectedPriceBases, minPrice, maxPrice, sort, q, includeInactive })}
       <button class="btn secondary" type="submit">搜尋</button>
       <label class="checkbox-row toolbar-inactive-toggle"><input type="checkbox" name="inactive" ${includeInactive ? "checked" : ""}>含停用</label>
@@ -307,18 +309,31 @@ function renderMaterials() {
           ${
             rows.length
               ? rows
-                  .map(
-                    (item) => `<tr>
-                <td>${canEdit ? `<a class="link-strong" href="${link(`/materials/${item.id}`)}">${h(item.name)}</a>` : `<strong>${h(item.name)}</strong>`}${item.code ? `<div class="sub">#${h(item.code)}</div>` : ""}</td>
+                  .map((item) => {
+                    const source = sourceWorkflow?.materialSourcePresentation?.(item);
+                    const displayName = sourceWorkflow?.materialSourceDisplayName?.(item) || item.name || "未命名材料";
+                    const sourceModel = source?.reviewed?.product_model || source?.source?.product_model;
+                    const sourceDimension = source?.reviewed?.nominal_dimension || source?.source?.nominal_dimension;
+                    const sourceColor = source?.reviewed?.color || source?.source?.color;
+                    const sourceStatus = source?.status || "";
+                    const pricingText = item.pricing_type ? pricingLabel(item.pricing_type, true) : sourceStatus ? "待確認" : pricingLabel(item.pricing_type, true);
+                    const unitPriceText = item.unit_price === "" || item.unit_price == null ? "報價未確認" : `報價 ${money(item.unit_price)}`;
+                    const sourceSummary = [
+                      sourceModel ? `型號 ${sourceModel}` : "",
+                      sourceDimension ? `尺寸 ${sourceDimension}` : "",
+                      sourceColor ? `花色 ${sourceColor}` : "",
+                    ].filter(Boolean).join(" · ");
+                    return `<tr data-material-source-status="${h(sourceStatus)}">
+                <td>${canEdit ? `<a class="link-strong" href="${link(`/materials/${item.id}`)}">${h(displayName)}</a>` : `<strong>${h(displayName)}</strong>`}${item.code ? `<div class="sub">#${h(item.code)}</div>` : ""}${sourceSummary ? `<div class="sub material-source-list-summary">${h(sourceSummary)}</div>` : ""}</td>
                 <td>${h(item.category || "—")}</td>
-                <td>${h(pricingLabel(item.pricing_type, true))}<div class="sub">${h(item.formula_version || "legacy-v1")} / ${h(item.unit)}</div></td>
-                <td>${item.cost_price === "" || item.cost_price == null ? `<span class="muted">未建成本</span>` : money(item.cost_price)}<div class="sub">報價 ${money(item.unit_price)}</div></td>
+                <td>${h(pricingText)}<div class="sub">${h(item.formula_version || (sourceStatus ? "—" : "legacy-v1"))} / ${h(item.unit || "—")}</div></td>
+                <td>${item.cost_price === "" || item.cost_price == null ? `<span class="muted">未建成本</span>` : money(item.cost_price)}<div class="sub">${h(unitPriceText)}</div></td>
                 <td>${item.cost_price === "" || item.cost_price == null || !n(item.unit_price) ? "—" : `${(((n(item.unit_price) - n(item.cost_price)) / n(item.unit_price)) * 100).toFixed(1)}%`}</td>
                 <td>${n(item.labor_unit_price) ? money(item.labor_unit_price) : "—"}</td>
                 <td>${n(item.waste_pct) ? `${h(item.waste_pct)}%` : "—"}</td>
-                <td>${statusBadge(item.is_active ? "啟用" : "停用", item.is_active ? "green" : "")}</td>
-              </tr>`
-                  )
+                <td>${statusBadge(item.is_active ? "啟用" : "停用", item.is_active ? "green" : "")}${sourceStatus ? `<div class="material-source-list-status">${statusBadge(sourceStatus === "approved" ? "來源已核准" : sourceStatus === "reviewed" ? "來源已檢視" : "來源待審", sourceStatus === "approved" ? "green" : "amber")}</div>` : ""}</td>
+              </tr>`;
+                  })
                   .join("")
               : `<tr><td colspan="8"><div class="empty">沒有符合條件的材料</div></td></tr>`
           }

@@ -114,7 +114,9 @@ function renderPickerPanel(type) {
     items = state.templates.filter((item) => item.is_active).map((item) => ({ id: item.id, title: item.name, sub: item.description }));
   }
   if (type === "material") {
-    items = state.materials.filter((item) => item.is_active).map((item) => ({ id: item.id, title: item.name, sub: `${item.category} · #${item.code}` }));
+    items = state.materials.filter((item) => (
+      window.MaterialSourceWorkflow?.materialSourceCanParticipateInQuotes?.(item) ?? item.is_active
+    )).map((item) => ({ id: item.id, title: item.name, sub: `${item.category} · #${item.code}` }));
   }
   const needle = ui.pickerSearch.toLowerCase();
   const filtered = items.filter((item) => `${item.title} ${item.sub}`.toLowerCase().includes(needle));

@@ -105,6 +105,9 @@
     if (Object.prototype.hasOwnProperty.call(existing, "specifications")) {
       fields.specifications = existing.specifications;
     }
+    if (Object.prototype.hasOwnProperty.call(existing, "material_source_metadata")) {
+      fields.material_source_metadata = existing.material_source_metadata;
+    }
     return fields;
   }
 

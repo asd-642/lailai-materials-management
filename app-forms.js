@@ -46,6 +46,7 @@ function renderMaterialForm(materialId) {
         ${materialCategoryField(data.category)}
         ${unitField(data.unit)}
       </div></section>
+      ${window.MaterialSourceWorkflow?.renderMaterialSourceEditor?.(data, { escapeHtml: h }) || ""}
       <section class="card"><div class="card-header"><h2>計價方式與規格</h2></div><div class="card-body">
         <div class="form-grid material-pricing-grid">
           <div class="field"><label>計價類型*</label><select class="select" name="pricing_type">${pricingOptionsHtml(data.pricing_type)}</select><small>${h(opt.hint)} 儲存後會依選擇的計價類型顯示對應說明。</small></div>

@@ -14,6 +14,51 @@
   const CANONICAL_JSON_FORMAT = "canonical-json-sorted-keys/v1";
   const DIMENSION_UNIT_TO_CM = Object.freeze({ mm: 0.1, cm: 1, m: 100 });
   const MATERIAL_SPECIFICATIONS_SCHEMA = "material-specifications/v1";
+  const MATERIAL_SOURCE_METADATA_SCHEMA = "material-source-metadata/v1";
+  const MATERIAL_MASTER_STAGING_BUNDLE_SCHEMA = "material-master-staging/v1";
+  const MATERIAL_SOURCE_IDENTIFIER_FIELDS = Object.freeze(["product_model", "article_code", "pcces_code"]);
+  const MATERIAL_SOURCE_DESCRIPTIVE_FIELDS = Object.freeze([
+    "product_name", "pcces_code", "mold_spec", "color", "grind", "emboss", "surface_finish", "cross_section", "product_image",
+    "application", "accessories", "notes", "chair_leg_spec", "material", "stock_status",
+  ]);
+  const MATERIAL_SOURCE_MEASUREMENT_FIELDS = Object.freeze([
+    "nominal_dimension", "actual_dimension", "length", "weight", "inner_geometry",
+  ]);
+  const MATERIAL_SOURCE_LINER_FIELDS = Object.freeze(["material_code", "spec", "wall_thickness", "article_code"]);
+  const MATERIAL_SOURCE_COMPONENT_FIELDS = Object.freeze(["plastic_fastener", "stainless_fastener", "other"]);
+  const MATERIAL_SOURCE_RECORD_FIELDS = Object.freeze([
+    "product_model", "product_name", "article_code", "pcces_code", "nominal_dimension", "actual_dimension", "length", "color",
+    "grind", "emboss", "weight", "weight_unit", "weight_basis", "application", "plastic_fastener", "stainless_fastener",
+    "other_component", "notes", "stock_status", "chair_leg_spec", "material", "inner_geometry", "liner_material_code", "liner_spec",
+    "liner_wall_thickness", "liner_article_code",
+  ]);
+  const MATERIAL_SOURCE_RECORD_CELL_FIELDS = Object.freeze([
+    "model", "name", "code", "pcces", "color", "grind", "emboss", "weight", "application", "plastic_fastener",
+    "stainless_fastener", "other_component", "notes", "stock_status", "chair_leg_spec", "material", "liner_material_code",
+    "liner_wall_thickness", "liner_article_code", "nominal_dimension", "actual_dimension", "length", "inner_geometry", "liner_spec",
+  ]);
+  const MATERIAL_STAGING_COMPARISON_FIELDS = Object.freeze([
+    "product_model", "article_code", "product_name", "nominal_dimension", "weight", "application", "grind", "emboss",
+  ]);
+  const MATERIAL_STAGING_SOURCE_CELL_ALIASES = Object.freeze({ product_model: "model", product_name: "name", article_code: "code", pcces_code: "pcces" });
+  const MATERIAL_STAGING_COMPARISON_STATUSES = new Set([
+    "all_null", "source_null", "master_null_actual_present", "master_null", "source_matches_master_actual_present", "match",
+    "source_differs_from_master_actual_present", "different",
+  ]);
+  const MATERIAL_STAGING_DEDUPE_RULES = Object.freeze({
+    profile: "完整原始型號 NFKC/trim/whitespace-collapse/uppercase 僅作比對",
+    chair: "完整文中編碼字串僅作比對",
+    fastener: "完整文中編碼字串僅作比對",
+    cap: "名稱＋規格＋成形方式僅作比對",
+  });
+  const MATERIAL_STAGING_TOP_LEVEL_DEDUPE_RULES = Object.freeze({
+    profile: "NFKC + trim + collapse whitespace + uppercase on the complete raw model; comparison only",
+    chair: "complete raw article code as string; normalized comparison only",
+    fastener: "complete raw article code as string; normalized comparison only",
+    cap: "name + nominal spec + forming-method note; normalized comparison only",
+    base_token: "review candidate only; never automatically merged",
+    raw_values: "never replaced by normalized keys",
+  });
   const MATERIAL_SPECIFICATION_PRECISION = 12;
   const MATERIAL_SPEC_ERROR_CODES = Object.freeze({
     OK: "OK",
@@ -182,6 +227,59 @@
     return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
   }
 
+  function sha256HexSync(value) {
+    const bytes = new TextEncoder().encode(String(value));
+    const rotateRight = (word, bits) => (word >>> bits) | (word << (32 - bits));
+    const constants = [
+      0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+      0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+      0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+      0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+      0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+      0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+      0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+      0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+    const hash = [
+      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ];
+    const bitLength = bytes.length * 8;
+    const paddedLength = Math.ceil((bytes.length + 9) / 64) * 64;
+    const padded = new Uint8Array(paddedLength);
+    padded.set(bytes);
+    padded[bytes.length] = 0x80;
+    const high = Math.floor(bitLength / 0x100000000);
+    const low = bitLength >>> 0;
+    const view = new DataView(padded.buffer);
+    view.setUint32(paddedLength - 8, high, false);
+    view.setUint32(paddedLength - 4, low, false);
+    const words = new Uint32Array(64);
+    for (let offset = 0; offset < paddedLength; offset += 64) {
+      for (let index = 0; index < 16; index += 1) words[index] = view.getUint32(offset + index * 4, false);
+      for (let index = 16; index < 64; index += 1) {
+        const left = words[index - 15];
+        const right = words[index - 2];
+        const sigma0 = rotateRight(left, 7) ^ rotateRight(left, 18) ^ (left >>> 3);
+        const sigma1 = rotateRight(right, 17) ^ rotateRight(right, 19) ^ (right >>> 10);
+        words[index] = (words[index - 16] + sigma0 + words[index - 7] + sigma1) >>> 0;
+      }
+      let [a, b, c, d, e, f, g, h] = hash;
+      for (let index = 0; index < 64; index += 1) {
+        const sum1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
+        const choice = (e & f) ^ (~e & g);
+        const temporary1 = (h + sum1 + choice + constants[index] + words[index]) >>> 0;
+        const sum0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
+        const majority = (a & b) ^ (a & c) ^ (b & c);
+        const temporary2 = (sum0 + majority) >>> 0;
+        h = g; g = f; f = e; e = (d + temporary1) >>> 0;
+        d = c; c = b; b = a; a = (temporary1 + temporary2) >>> 0;
+      }
+      [a, b, c, d, e, f, g, h].forEach((word, index) => { hash[index] = (hash[index] + word) >>> 0; });
+    }
+    return hash.map((word) => word.toString(16).padStart(8, "0")).join("");
+  }
+
   async function hashCanonicalValue(value) {
     return sha256Hex(canonicalStringify(value));
   }
@@ -192,6 +290,1055 @@
 
   function hasValue(value) {
     return value !== "" && value !== null && value !== undefined;
+  }
+
+  function nullableSourceValue(value) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === "string" && !value.trim()) return null;
+    return deepClone(value);
+  }
+
+  function normalizeNullableSourceObject(input, fields) {
+    const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+    const normalized = deepClone(source);
+    fields.forEach((field) => {
+      normalized[field] = nullableSourceValue(source[field]);
+    });
+    return normalized;
+  }
+
+  function normalizeSourceMeasurement(input) {
+    if (input === null || input === undefined || (typeof input === "string" && !input.trim())) return null;
+    if (typeof input !== "object" || Array.isArray(input)) {
+      return { raw: String(input), value: null, unit: null, basis: null };
+    }
+    return normalizeNullableSourceObject(input, ["raw", "value", "unit", "basis"]);
+  }
+
+  function normalizeMaterialSourceMetadata(material) {
+    const source = material && typeof material === "object" && !Array.isArray(material) ? material : {};
+    if (!Object.prototype.hasOwnProperty.call(source, "material_source_metadata")) return { ...source };
+    const input = source.material_source_metadata;
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      return { ...source, material_source_metadata: deepClone(input) };
+    }
+    if (input.schema !== MATERIAL_SOURCE_METADATA_SCHEMA) {
+      return { ...source, material_source_metadata: deepClone(input) };
+    }
+    const identifiers = normalizeNullableSourceObject(input.identifiers, MATERIAL_SOURCE_IDENTIFIER_FIELDS);
+    const descriptive = normalizeNullableSourceObject(input.descriptive, MATERIAL_SOURCE_DESCRIPTIVE_FIELDS);
+    const measurementInput = input.measurements && typeof input.measurements === "object" && !Array.isArray(input.measurements)
+      ? input.measurements
+      : {};
+    const measurements = deepClone(measurementInput);
+    MATERIAL_SOURCE_MEASUREMENT_FIELDS.forEach((field) => {
+      measurements[field] = normalizeSourceMeasurement(measurementInput[field]);
+    });
+    const liner = normalizeNullableSourceObject(input.liner, MATERIAL_SOURCE_LINER_FIELDS);
+    const compatibleComponents = normalizeNullableSourceObject(input.compatible_components, MATERIAL_SOURCE_COMPONENT_FIELDS);
+    const comparisonInput = input.comparisons && typeof input.comparisons === "object" && !Array.isArray(input.comparisons)
+      ? input.comparisons
+      : {};
+    const comparisons = {};
+    Object.entries(comparisonInput).forEach(([field, observation]) => {
+      comparisons[field] = normalizeNullableSourceObject(observation, [
+        "actual_value", "master_value", "source_value", "source_ref", "comparison_status",
+      ]);
+    });
+    const provenanceInput = input.provenance && typeof input.provenance === "object" && !Array.isArray(input.provenance)
+      ? input.provenance
+      : {};
+    const provenance = normalizeNullableSourceObject(provenanceInput, [
+      "workbook_file_name", "workbook_sha256", "sheet", "row", "source_record_id", "source_record_sha256",
+    ]);
+    if (Array.isArray(provenanceInput.cells)) {
+      provenance.cells = provenanceInput.cells.map(nullableSourceValue);
+    } else if (provenanceInput.cells && typeof provenanceInput.cells === "object") {
+      provenance.cells = Object.fromEntries(Object.entries(provenanceInput.cells).map(([field, cell]) => [field, nullableSourceValue(cell)]));
+    } else {
+      provenance.cells = {};
+    }
+    provenance.assets = Array.isArray(provenanceInput.assets)
+      ? provenanceInput.assets.map((asset) => normalizeNullableSourceObject(asset, [
+        "asset_ref", "role", "sha256", "mime_type", "storage_uri", "source_anchor_range",
+      ]))
+      : [];
+    return {
+      ...source,
+      material_source_metadata: {
+        ...deepClone(input),
+        schema: MATERIAL_SOURCE_METADATA_SCHEMA,
+        identifiers,
+        descriptive,
+        measurements,
+        liner,
+        compatible_components: compatibleComponents,
+        comparisons,
+        provenance,
+      },
+    };
+  }
+
+  function validateMaterialSourceMetadata(material) {
+    if (!material || typeof material !== "object" || Array.isArray(material)) {
+      return { ok: false, errors: ["材料來源中繼資料所屬材料格式無效"] };
+    }
+    if (!Object.prototype.hasOwnProperty.call(material, "material_source_metadata")) return { ok: true, errors: [] };
+    const metadata = material.material_source_metadata;
+    const errors = [];
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+      return { ok: false, errors: ["材料來源中繼資料格式無效"] };
+    }
+    if (metadata.schema !== MATERIAL_SOURCE_METADATA_SCHEMA) errors.push("材料來源中繼資料 schema 無法辨識");
+    ["identifiers", "descriptive", "measurements", "liner", "compatible_components", "comparisons", "provenance"].forEach((field) => {
+      if (!metadata[field] || typeof metadata[field] !== "object" || Array.isArray(metadata[field])) {
+        errors.push(`材料來源中繼資料 ${field} 格式無效`);
+      }
+    });
+    if (metadata.identifiers && typeof metadata.identifiers === "object" && !Array.isArray(metadata.identifiers)) {
+      ["product_model", "article_code", "pcces_code"].forEach((field) => {
+        const value = metadata.identifiers[field];
+        if (value !== null && value !== undefined && typeof value !== "string") errors.push(`材料來源識別碼 ${field} 必須是字串或 NULL`);
+      });
+    }
+    if (metadata.measurements && typeof metadata.measurements === "object" && !Array.isArray(metadata.measurements)) {
+      Object.entries(metadata.measurements).forEach(([field, measurement]) => {
+        if (measurement === null) return;
+        if (!measurement || typeof measurement !== "object" || Array.isArray(measurement)) {
+          errors.push(`材料來源量測 ${field} 格式無效`);
+          return;
+        }
+        if (measurement.value !== null && measurement.value !== undefined && (typeof measurement.value !== "number" || !Number.isFinite(measurement.value))) {
+          errors.push(`材料來源量測 ${field}.value 必須是有限數字或 NULL`);
+        }
+        ["raw", "unit", "basis"].forEach((key) => {
+          const value = measurement[key];
+          if (value !== null && value !== undefined && typeof value !== "string") errors.push(`材料來源量測 ${field}.${key} 必須是字串或 NULL`);
+        });
+      });
+    }
+    if (metadata.comparisons && typeof metadata.comparisons === "object" && !Array.isArray(metadata.comparisons)) {
+      Object.entries(metadata.comparisons).forEach(([field, observation]) => {
+        if (!observation || typeof observation !== "object" || Array.isArray(observation)) {
+          errors.push(`材料來源比較 ${field} 格式無效`);
+          return;
+        }
+        ["actual_value", "master_value", "source_value"].forEach((key) => {
+          if (!Object.prototype.hasOwnProperty.call(observation, key)) errors.push(`材料來源比較 ${field}.${key} 不可省略`);
+        });
+      });
+    }
+    const provenance = metadata.provenance;
+    if (provenance && typeof provenance === "object" && !Array.isArray(provenance)) {
+      if (provenance.row !== null && provenance.row !== undefined && (!Number.isInteger(provenance.row) || provenance.row < 1)) {
+        errors.push("材料來源列號必須是正整數或 NULL");
+      }
+      const cellsAreValid = Array.isArray(provenance.cells)
+        ? provenance.cells.every((cell) => cell === null || typeof cell === "string")
+        : provenance.cells && typeof provenance.cells === "object"
+          && Object.values(provenance.cells).every((cell) => cell === null || typeof cell === "string");
+      if (!cellsAreValid) errors.push("材料來源儲存格必須是字串陣列或欄位座標物件");
+      if (!Array.isArray(provenance.assets)) {
+        errors.push("材料來源圖片必須是陣列");
+      } else {
+        provenance.assets.forEach((asset, index) => {
+          if (!asset || typeof asset !== "object" || Array.isArray(asset)) {
+            errors.push(`材料來源圖片 ${index + 1} 格式無效`);
+            return;
+          }
+          ["asset_ref", "role", "sha256", "mime_type", "storage_uri", "source_anchor_range"].forEach((field) => {
+            const value = asset[field];
+            if (value !== null && value !== undefined && typeof value !== "string") errors.push(`材料來源圖片 ${index + 1}.${field} 必須是字串或 NULL`);
+          });
+        });
+      }
+    }
+    return { ok: errors.length === 0, errors };
+  }
+
+  function isPlainRecord(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function hasOwn(value, field) {
+    return Object.prototype.hasOwnProperty.call(value, field);
+  }
+
+  function sameCanonicalValue(left, right) {
+    return canonicalStringify(left) === canonicalStringify(right);
+  }
+
+  function stagingNullable(value) {
+    return value === null || value === undefined || (typeof value === "string" && !value.trim()) ? null : value;
+  }
+
+  function validateFixedNullableStrings(value, fields, prefix, errors, exactKeys = false) {
+    if (!isPlainRecord(value)) {
+      errors.push(`${prefix} 格式無效`);
+      return;
+    }
+    fields.forEach((field) => {
+      if (!hasOwn(value, field)) {
+        errors.push(`${prefix}.${field} 不可省略`);
+        return;
+      }
+      const fieldValue = value[field];
+      if (fieldValue !== null && typeof fieldValue !== "string") {
+        errors.push(`${prefix}.${field} 必須是字串或 NULL`);
+      } else if (typeof fieldValue === "string" && !fieldValue.trim()) {
+        errors.push(`${prefix}.${field} 空白必須保存為 NULL`);
+      }
+    });
+    if (exactKeys && !sameCanonicalValue(Object.keys(value).sort(), [...fields].sort())) {
+      errors.push(`${prefix} 欄位集合不符合固定契約`);
+    }
+  }
+
+  function normalizedStagingKey(value) {
+    if (value === null || value === undefined) return "";
+    return String(value).normalize("NFKC").replace(/\s+/gu, " ").trim().toUpperCase();
+  }
+
+  function stagingNumbers(value) {
+    const nullable = stagingNullable(value);
+    if (nullable === null) return [];
+    const matches = String(nullable).replace(/,/g, "").match(/[-+]?\d+(?:\.\d+)?/g) || [];
+    return matches.map(Number).filter(Number.isFinite);
+  }
+
+  function canonicalStagingNumber(value) {
+    const numbers = stagingNumbers(value);
+    return numbers.length === 1 ? ["number", numbers[0].toPrecision(12)] : ["text", normalizedStagingKey(value)];
+  }
+
+  function canonicalStagingDimension(value) {
+    const numbers = stagingNumbers(value);
+    return numbers.length ? ["dimension", ...numbers.map((number) => number.toPrecision(12))] : ["text", normalizedStagingKey(value)];
+  }
+
+  function sourceRecordPriority(record, originalIndex = 0) {
+    const recordType = typeof record?.record_type === "string" ? record.record_type : "";
+    const rank = recordType.startsWith("mold_master")
+      ? 0
+      : new Set(["chair_product", "fastener_or_accessory", "cap_or_edge_accessory"]).has(recordType)
+        ? 1
+        : recordType.startsWith("material_spec") ? 2 : 3;
+    const sourceRow = Number.isInteger(record?.source_row) ? record.source_row : 0;
+    const sheetIndex = Number.isInteger(record?.source_sheet_index) ? record.source_sheet_index : 0;
+    return [rank, sourceRow, sheetIndex, originalIndex];
+  }
+
+  function orderedCandidateRecords(records) {
+    return records.map((record, index) => ({ record, priority: sourceRecordPriority(record, index) }))
+      .sort((left, right) => {
+        for (let index = 0; index < left.priority.length; index += 1) {
+          if (left.priority[index] !== right.priority[index]) return left.priority[index] - right.priority[index];
+        }
+        return 0;
+      })
+      .map((entry) => entry.record);
+  }
+
+  function selectedCandidateRecord(records, field) {
+    const ordered = orderedCandidateRecords(records);
+    return ordered.find((record) => stagingNullable(record?.fields?.[field]) !== null) || ordered[0] || null;
+  }
+
+  function stagingSourceRef(record, field = null) {
+    if (!record || typeof record.source_sheet !== "string" || !Number.isInteger(record.source_row)) return null;
+    const base = `${record.source_sheet}!${record.source_row}`;
+    if (!field) return base;
+    const sourceCellField = MATERIAL_STAGING_SOURCE_CELL_ALIASES[field] || field;
+    const cells = record.source_cells?.[sourceCellField];
+    return typeof cells === "string" ? `${base} [${cells}]` : base;
+  }
+
+  function sourceNumericCellValue(record, field) {
+    const sourceCellField = MATERIAL_STAGING_SOURCE_CELL_ALIASES[field] || field;
+    const cells = record?.source_cells?.[sourceCellField];
+    if (typeof cells !== "string") return null;
+    const values = cells.split(";").flatMap((address) => {
+      const value = record?.raw_payload?.[address]?.value2;
+      return typeof value === "number" && Number.isFinite(value) ? [value] : [];
+    });
+    return values.length === 1 ? values[0] : null;
+  }
+
+  function expectedComparisonStatus(field, sourceValue, masterValue, actualValue, sourceRecord) {
+    const source = stagingNullable(sourceValue);
+    const master = stagingNullable(masterValue);
+    const actual = stagingNullable(actualValue);
+    if (source === null && master === null && actual === null) return "all_null";
+    if (source === null) return "source_null";
+    if (master === null) return actual !== null ? "master_null_actual_present" : "master_null";
+    let comparableSource = source;
+    let canonicalizer = normalizedStagingKey;
+    if (field === "weight") {
+      const numericCellValue = sourceNumericCellValue(sourceRecord, field);
+      if (numericCellValue !== null) comparableSource = numericCellValue;
+      canonicalizer = canonicalStagingNumber;
+    } else if (field === "nominal_dimension") {
+      canonicalizer = canonicalStagingDimension;
+    }
+    const matches = sameCanonicalValue(canonicalizer(comparableSource), canonicalizer(master));
+    if (matches) return actual !== null ? "source_matches_master_actual_present" : "match";
+    return actual !== null ? "source_differs_from_master_actual_present" : "different";
+  }
+
+  function stagingDedupeIdentity(record) {
+    const fields = record?.fields || {};
+    const recordType = record?.record_type;
+    if (new Set([
+      "material_spec_hollow", "material_spec_solid", "material_spec_new_profile", "mold_master_hollow", "mold_master_solid",
+      "mold_master_coextruded",
+    ]).has(recordType)) {
+      const key = normalizedStagingKey(fields.product_model);
+      return key ? { kind: "profile", key } : null;
+    }
+    if (recordType === "chair_product" || recordType === "fastener_or_accessory") {
+      const key = normalizedStagingKey(fields.article_code);
+      return key ? { kind: recordType === "chair_product" ? "chair" : "fastener", key } : null;
+    }
+    if (recordType === "cap_or_edge_accessory") {
+      const parts = [fields.product_name, fields.nominal_dimension, fields.notes].map(normalizedStagingKey);
+      return parts.some(Boolean) ? { kind: "cap", key: parts.join("|") } : null;
+    }
+    return null;
+  }
+
+  function expectedStagingVariant(record) {
+    const fields = isPlainRecord(record?.fields) ? record.fields : {};
+    return {
+      variant_key_sha256: sha256HexSync([
+        fields.product_model, fields.nominal_dimension, fields.grind, fields.emboss, fields.color,
+      ].map(normalizedStagingKey).join("\0")),
+      source_record_id: record.source_record_id,
+      source_ref: stagingSourceRef(record),
+      nominal_dimension_raw: stagingNullable(fields.nominal_dimension),
+      actual_dimension_raw: stagingNullable(fields.actual_dimension),
+      color_raw: stagingNullable(fields.color),
+      grind_raw: stagingNullable(fields.grind),
+      emboss_raw: stagingNullable(fields.emboss),
+      weight_raw: stagingNullable(fields.weight),
+    };
+  }
+
+  function validateMaterialMasterStagingBundle(bundle) {
+    const errors = [];
+    if (!bundle || typeof bundle !== "object" || Array.isArray(bundle)) return { ok: false, errors: ["材料 staging bundle 格式無效"] };
+    if (bundle.schema !== MATERIAL_MASTER_STAGING_BUNDLE_SCHEMA) errors.push("材料 staging bundle schema 無法辨識");
+    if (typeof bundle.generated_at !== "string" || !bundle.generated_at.trim()) errors.push("材料 staging bundle 缺少產生時間");
+    if (bundle.formal_website_loaded !== false) errors.push("材料 staging bundle 必須標記 formal_website_loaded=false");
+    if (bundle.supabase_written !== false) errors.push("材料 staging bundle 必須標記 supabase_written=false");
+    if (bundle.formal_import_executed !== false) errors.push("材料 staging bundle 必須標記 formal_import_executed=false");
+    if (bundle.schema_migration_executed !== false) errors.push("材料 staging bundle 必須標記 schema_migration_executed=false");
+    if (bundle.source_workbook_overwritten !== false) errors.push("材料 staging bundle 必須標記 source_workbook_overwritten=false");
+    if (bundle.action_policy !== "review_required_only") errors.push("材料 staging bundle action_policy 必須是 review_required_only");
+    if (!sameCanonicalValue(bundle.dedupe_rules, MATERIAL_STAGING_TOP_LEVEL_DEDUPE_RULES)) {
+      errors.push("材料 staging bundle dedupe_rules 缺漏或與固定規則不一致");
+    }
+    if (!Array.isArray(bundle.comments)) errors.push("材料 staging bundle comments 必須是陣列");
+    if (!Array.isArray(bundle.source_formula_errors)) errors.push("材料 staging bundle source_formula_errors 必須是陣列");
+    if (!Array.isArray(bundle.catalog_assets)) errors.push("材料 staging bundle catalog_assets 必須是陣列");
+    if (bundle.build_metadata_artifact !== "build-metadata.json"
+      || typeof bundle.build_metadata_artifact_sha256 !== "string"
+      || !/^[a-f0-9]{64}$/i.test(bundle.build_metadata_artifact_sha256)) {
+      errors.push("材料 staging bundle build metadata artifact 無效");
+    }
+    const source = bundle.source;
+    if (!source || typeof source !== "object" || Array.isArray(source)) {
+      errors.push("材料 staging bundle 缺少來源");
+    } else {
+      if (typeof source.workbook_file_name !== "string" || !source.workbook_file_name.trim()) errors.push("材料 staging bundle 缺少來源檔名");
+      if (typeof source.workbook_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(source.workbook_sha256)) errors.push("材料 staging bundle 來源 SHA-256 無效");
+      if (!Number.isInteger(source.byte_size) || source.byte_size < 1) errors.push("材料 staging bundle 來源 byte_size 無效");
+      if (source.source_unchanged !== true) errors.push("材料 staging bundle 必須證明 source_unchanged=true");
+      if (source.extract_artifact !== "source-extract.json" || typeof source.extract_artifact_sha256 !== "string"
+        || !/^[a-f0-9]{64}$/i.test(source.extract_artifact_sha256)) errors.push("材料 staging bundle extract artifact 無效");
+      if (source.current_fixture_artifact !== "current-material-master-fixture.json" || typeof source.current_fixture_artifact_sha256 !== "string"
+        || !/^[a-f0-9]{64}$/i.test(source.current_fixture_artifact_sha256)) errors.push("材料 staging bundle current fixture artifact 無效");
+    }
+    const inputValidations = bundle.input_validations;
+    if (!inputValidations || typeof inputValidations !== "object" || Array.isArray(inputValidations)) {
+      errors.push("材料 staging bundle 缺少 input_validations");
+    } else {
+      ["source_extract", "current_fixture", "assets", "bundle_asset_coverage"].forEach((field) => {
+        if (!inputValidations[field] || typeof inputValidations[field] !== "object" || Array.isArray(inputValidations[field])) {
+          errors.push(`材料 staging input_validations.${field} 格式無效`);
+        }
+      });
+    }
+    const statistics = bundle.statistics;
+    if (!statistics || typeof statistics !== "object" || Array.isArray(statistics)) {
+      errors.push("材料 staging bundle 缺少 statistics");
+    }
+    if (!Array.isArray(bundle.records) || bundle.records.length === 0) {
+      errors.push("材料 staging bundle records 必須是非空陣列");
+    } else {
+      const ids = new Set();
+      const globalSourceRecordIds = new Set();
+      const stagedKindCounts = {};
+      let stagedCandidateSourceCount = 0;
+      let stagedLinerOptionCount = 0;
+      bundle.records.forEach((record, index) => {
+        if (!record || typeof record !== "object" || Array.isArray(record)) {
+          errors.push(`材料 staging 第 ${index + 1} 筆格式無效`);
+          return;
+        }
+        if (typeof record.staging_id !== "string" || !/^staging:material:[a-f0-9]{24}$/.test(record.staging_id)) errors.push(`材料 staging 第 ${index + 1} 筆 staging_id 無效`);
+        else if (ids.has(record.staging_id)) errors.push(`材料 staging_id 重複：${record.staging_id}`);
+        else ids.add(record.staging_id);
+        if (record.action !== "review_required") errors.push(`材料 staging 第 ${index + 1} 筆 action 必須是 review_required`);
+        if (!record.material || !Object.prototype.hasOwnProperty.call(record.material, "material_source_metadata")) {
+          errors.push(`材料 staging 第 ${index + 1} 筆缺少 material_source_metadata`);
+          return;
+        }
+        if (record.material.id !== record.staging_id) errors.push(`材料 staging 第 ${index + 1} 筆 material.id 必須等於 staging_id`);
+        if (!Array.isArray(record.review_reasons) || record.review_reasons.length === 0
+          || record.review_reasons.some((value) => typeof value !== "string" || !value.trim())) {
+          errors.push(`材料 staging 第 ${index + 1} 筆缺少人工 review_reasons`);
+        }
+        if (!Array.isArray(record.requires_user_confirmation) || record.requires_user_confirmation.length === 0
+          || record.requires_user_confirmation.some((value) => typeof value !== "string" || !value.trim())) {
+          errors.push(`材料 staging 第 ${index + 1} 筆缺少 requires_user_confirmation`);
+        }
+        const validation = validateMaterialSourceMetadata(record.material);
+        if (!validation.ok) validation.errors.forEach((error) => errors.push(`材料 staging 第 ${index + 1} 筆：${error}`));
+        const normalized = normalizeMaterialSourceMetadata(record.material);
+        if (canonicalStringify(normalized.material_source_metadata) !== canonicalStringify(record.material.material_source_metadata)) {
+          errors.push(`材料 staging 第 ${index + 1} 筆來源空白尚未正規化為 NULL`);
+        }
+        const metadata = record.material.material_source_metadata;
+        const provenance = metadata?.provenance;
+        const prefix = `材料 staging 第 ${index + 1} 筆`;
+        ["name", "code", "category", "unit"].forEach((field) => {
+          if (!hasOwn(record.material, field)) {
+            errors.push(`${prefix} material.${field} 不可省略`);
+            return;
+          }
+          const value = record.material[field];
+          if (value !== null && typeof value !== "string") errors.push(`${prefix} material.${field} 必須是字串或 NULL`);
+          else if (typeof value === "string" && !value.trim()) errors.push(`${prefix} material.${field} 空白必須保存為 NULL`);
+        });
+        if (record.material.unit !== null) errors.push(`${prefix} material.unit 在 review-only staging 必須是 NULL`);
+        validateFixedNullableStrings(metadata?.identifiers, MATERIAL_SOURCE_IDENTIFIER_FIELDS, `${prefix} identifiers`, errors);
+        validateFixedNullableStrings(metadata?.descriptive, MATERIAL_SOURCE_DESCRIPTIVE_FIELDS, `${prefix} descriptive`, errors);
+        validateFixedNullableStrings(metadata?.liner, MATERIAL_SOURCE_LINER_FIELDS, `${prefix} liner`, errors);
+        validateFixedNullableStrings(metadata?.compatible_components, MATERIAL_SOURCE_COMPONENT_FIELDS, `${prefix} compatible_components`, errors);
+        if (!isPlainRecord(metadata?.measurements)) {
+          errors.push(`${prefix} measurements 格式無效`);
+        } else {
+          MATERIAL_SOURCE_MEASUREMENT_FIELDS.forEach((field) => {
+            if (!hasOwn(metadata.measurements, field) || !isPlainRecord(metadata.measurements[field])) {
+              errors.push(`${prefix} measurements.${field} 必須保留 raw/value/unit/basis 容器`);
+              return;
+            }
+            const measurement = metadata.measurements[field];
+            ["raw", "value", "unit", "basis"].forEach((key) => {
+              if (!hasOwn(measurement, key)) errors.push(`${prefix} measurements.${field}.${key} 不可省略`);
+            });
+            ["raw", "unit", "basis"].forEach((key) => {
+              const value = measurement[key];
+              if (value !== null && typeof value !== "string") errors.push(`${prefix} measurements.${field}.${key} 必須是字串或 NULL`);
+              else if (typeof value === "string" && !value.trim()) errors.push(`${prefix} measurements.${field}.${key} 空白必須保存為 NULL`);
+            });
+            if (measurement.value !== null && (typeof measurement.value !== "number" || !Number.isFinite(measurement.value))) {
+              errors.push(`${prefix} measurements.${field}.value 必須是有限數字或 NULL`);
+            }
+          });
+        }
+        const sourceRecords = metadata?.source_records;
+        const sourceRecordIndex = new Map();
+        const candidateSourceRecordIndex = new Map();
+        const linerSourceRecordIndex = new Map();
+        let recordCandidateSourceCount = 0;
+        const sourceLastColumns = {
+          material_spec_hollow: 21,
+          material_spec_solid: 21,
+          material_spec_new_profile: 21,
+          mold_master_hollow: 29,
+          liner_option: 29,
+          mold_master_solid: 28,
+          mold_master_coextruded: 36,
+          chair_product: 16,
+          fastener_or_accessory: 16,
+          cap_or_edge_accessory: 11,
+        };
+        const excelColumnName = (column) => {
+          let value = column;
+          let result = "";
+          while (value > 0) {
+            value -= 1;
+            result = String.fromCharCode(65 + (value % 26)) + result;
+            value = Math.floor(value / 26);
+          }
+          return result;
+        };
+        if (!Array.isArray(sourceRecords) || sourceRecords.length === 0) {
+          errors.push(`${prefix} 缺少完整 source_records`);
+        } else {
+          const sourceRecordIds = new Set();
+          sourceRecords.forEach((sourceRecord, sourceIndex) => {
+            const sourcePrefix = `${prefix} source_records 第 ${sourceIndex + 1} 筆`;
+            if (!sourceRecord || typeof sourceRecord !== "object" || Array.isArray(sourceRecord)) {
+              errors.push(`${sourcePrefix}格式無效`);
+              return;
+            }
+            if (!hasOwn(sourceRecord, "parent_source_record_id")
+              || (sourceRecord.parent_source_record_id !== null
+                && (typeof sourceRecord.parent_source_record_id !== "string" || !/^[a-f0-9]{64}$/i.test(sourceRecord.parent_source_record_id)))) {
+              errors.push(`${sourcePrefix} parent_source_record_id 必須是 64 位雜湊字串或 NULL`);
+            }
+            if (!hasOwn(sourceRecord, "category")
+              || (sourceRecord.category !== null && typeof sourceRecord.category !== "string")) {
+              errors.push(`${sourcePrefix} category 必須是字串或 NULL`);
+            } else if (typeof sourceRecord.category === "string" && !sourceRecord.category.trim()) {
+              errors.push(`${sourcePrefix} category 空白必須保存為 NULL`);
+            }
+            validateFixedNullableStrings(
+              sourceRecord.fields,
+              MATERIAL_SOURCE_RECORD_FIELDS,
+              `${sourcePrefix} fields`,
+              errors,
+              true,
+            );
+            if (!Array.isArray(sourceRecord.source_comments)) errors.push(`${sourcePrefix} source_comments 必須是陣列`);
+            const sourceRecordId = sourceRecord.source_record_id;
+            const sourceRecordHash = sourceRecord.source_record_sha256;
+            if (typeof sourceRecordId !== "string" || !/^[a-f0-9]{64}$/i.test(sourceRecordId)) {
+              errors.push(`${sourcePrefix} source_record_id 無效`);
+            } else if (sourceRecordIds.has(sourceRecordId.toLowerCase())) {
+              errors.push(`${sourcePrefix} source_record_id 重複`);
+            } else {
+              sourceRecordIds.add(sourceRecordId.toLowerCase());
+              if (globalSourceRecordIds.has(sourceRecordId.toLowerCase())) errors.push(`${sourcePrefix} 在 bundle 內重複出現`);
+              else globalSourceRecordIds.add(sourceRecordId.toLowerCase());
+            }
+            if (typeof sourceRecordHash !== "string" || !/^[a-f0-9]{64}$/i.test(sourceRecordHash)) {
+              errors.push(`${sourcePrefix} source_record_sha256 無效`);
+            } else {
+              const hashPayload = { ...sourceRecord };
+              delete hashPayload.source_record_sha256;
+              if (sha256HexSync(canonicalStringify(hashPayload)) !== sourceRecordHash.toLowerCase()) {
+                errors.push(`${sourcePrefix} source_record_sha256 與 raw payload 不一致`);
+              }
+            }
+            if (!sourceRecord.raw_payload || typeof sourceRecord.raw_payload !== "object" || Array.isArray(sourceRecord.raw_payload)
+              || Object.keys(sourceRecord.raw_payload).length === 0) {
+              errors.push(`${sourcePrefix} 缺少 raw_payload`);
+            } else {
+              Object.entries(sourceRecord.raw_payload).forEach(([address, cell]) => {
+                const cellPrefix = `${sourcePrefix} raw_payload.${address}`;
+                if (!/^[A-Z]{1,3}[1-9]\d*$/.test(address) || !cell || typeof cell !== "object" || Array.isArray(cell) || cell.address !== address) {
+                  errors.push(`${cellPrefix} 儲存格格式無效`);
+                  return;
+                }
+                ["text", "value2", "value2_kind", "value_kind", "number_format", "formula", "merge_area"].forEach((field) => {
+                  if (!Object.prototype.hasOwnProperty.call(cell, field)) errors.push(`${cellPrefix}.${field} 不可省略`);
+                });
+                if (cell.text !== null && typeof cell.text !== "string") errors.push(`${cellPrefix}.text 必須是字串或 NULL`);
+                if (!new Set(["null", "boolean", "number", "string"]).has(cell.value2_kind)) errors.push(`${cellPrefix}.value2_kind 無效`);
+                if (cell.value2_kind === "null" && cell.value2 !== null) errors.push(`${cellPrefix}.value2 與 null 型別不一致`);
+                if (cell.value2_kind === "boolean" && typeof cell.value2 !== "boolean") errors.push(`${cellPrefix}.value2 與 boolean 型別不一致`);
+                if (cell.value2_kind === "number" && (typeof cell.value2 !== "number" || !Number.isFinite(cell.value2))) errors.push(`${cellPrefix}.value2 必須是有限數字`);
+                if (cell.value2_kind === "string" && typeof cell.value2 !== "string") errors.push(`${cellPrefix}.value2 與 string 型別不一致`);
+                if (!new Set(["blank", "formula", "number", "text"]).has(cell.value_kind)) errors.push(`${cellPrefix}.value_kind 無效`);
+                ["number_format", "formula", "merge_area"].forEach((field) => {
+                  if (cell[field] !== null && typeof cell[field] !== "string") errors.push(`${cellPrefix}.${field} 必須是字串或 NULL`);
+                });
+              });
+            }
+            if (typeof sourceRecord.source_sheet !== "string" || !sourceRecord.source_sheet.trim()) errors.push(`${sourcePrefix} 缺少來源工作表`);
+            if (!Number.isInteger(sourceRecord.source_row) || sourceRecord.source_row < 1) errors.push(`${sourcePrefix} 缺少有效來源列號`);
+            if (typeof sourceRecord.record_type !== "string" || !sourceRecord.record_type.trim()) {
+              errors.push(`${sourcePrefix} 缺少 record_type`);
+            } else if (typeof source?.workbook_sha256 === "string" && typeof sourceRecord.source_sheet === "string"
+              && Number.isInteger(sourceRecord.source_row) && typeof sourceRecordId === "string") {
+              const expectedSourceRecordId = sha256HexSync(
+                `${source.workbook_sha256}\0${sourceRecord.source_sheet}\0${sourceRecord.source_row}\0${sourceRecord.record_type}`,
+              );
+              if (expectedSourceRecordId !== sourceRecordId.toLowerCase()) errors.push(`${sourcePrefix} source_record_id 與來源定位不一致`);
+            }
+            const lastColumn = sourceLastColumns[sourceRecord.record_type];
+            if (!lastColumn) {
+              errors.push(`${sourcePrefix} record_type 不支援`);
+            } else if (Number.isInteger(sourceRecord.source_row)) {
+              const expectedAddresses = Array.from({ length: lastColumn }, (_, column) => `${excelColumnName(column + 1)}${sourceRecord.source_row}`).sort();
+              if (canonicalStringify(Object.keys(sourceRecord.raw_payload || {}).sort()) !== canonicalStringify(expectedAddresses)) {
+                errors.push(`${sourcePrefix} raw_payload 未完整保存該類型來源列`);
+              }
+            }
+            if (sourceRecord.record_type === "liner_option") {
+              stagedLinerOptionCount += 1;
+              if (typeof sourceRecordId === "string") linerSourceRecordIndex.set(sourceRecordId.toLowerCase(), sourceRecord);
+            }
+            else {
+              stagedCandidateSourceCount += 1;
+              recordCandidateSourceCount += 1;
+              if (typeof sourceRecordId === "string") candidateSourceRecordIndex.set(sourceRecordId.toLowerCase(), sourceRecord);
+            }
+            const sourceCells = sourceRecord.source_cells;
+            validateFixedNullableStrings(
+              sourceCells,
+              MATERIAL_SOURCE_RECORD_CELL_FIELDS,
+              `${sourcePrefix} source_cells`,
+              errors,
+              true,
+            );
+            if (isPlainRecord(sourceCells)) {
+              Object.entries(sourceCells).forEach(([field, addresses]) => {
+                if (addresses === null) return;
+                if (typeof addresses !== "string" || !addresses.split(";").every((address) => /^[A-Z]{1,3}[1-9]\d*$/.test(address))) {
+                  errors.push(`${sourcePrefix} source_cells.${field} 定位無效`);
+                } else if (!addresses.split(";").every((address) => Object.prototype.hasOwnProperty.call(sourceRecord.raw_payload || {}, address))) {
+                  errors.push(`${sourcePrefix} source_cells.${field} 未對應 raw_payload`);
+                }
+              });
+            }
+            if (typeof sourceRecordId === "string") sourceRecordIndex.set(sourceRecordId.toLowerCase(), sourceRecord);
+          });
+        }
+        if (!Number.isInteger(record.source_record_count) || record.source_record_count < 1
+          || record.source_record_count !== recordCandidateSourceCount) {
+          errors.push(`${prefix} source_record_count 與非內襯來源列數不一致`);
+        }
+        const candidateRecords = Array.isArray(sourceRecords)
+          ? sourceRecords.filter((sourceRecord) => isPlainRecord(sourceRecord) && sourceRecord.record_type !== "liner_option")
+          : [];
+        const orderedCandidates = orderedCandidateRecords(candidateRecords);
+        const expectedDedupeIdentities = candidateRecords.map(stagingDedupeIdentity);
+        const expectedDedupeIdentity = expectedDedupeIdentities[0] || null;
+        if (!expectedDedupeIdentity || expectedDedupeIdentities.some(
+          (identity) => !identity || identity.kind !== expectedDedupeIdentity.kind || identity.key !== expectedDedupeIdentity.key,
+        )) {
+          errors.push(`${prefix} 非內襯來源列無法重算為同一保守去重群組`);
+        } else {
+          const expectedGroupHash = sha256HexSync(`${expectedDedupeIdentity.kind}\0${expectedDedupeIdentity.key}`);
+          const expectedStagingId = `staging:material:${expectedGroupHash.slice(0, 24)}`;
+          const expectedDedupe = {
+            kind: expectedDedupeIdentity.kind,
+            rule: MATERIAL_STAGING_DEDUPE_RULES[expectedDedupeIdentity.kind],
+            key_sha256: expectedGroupHash,
+            raw_values_never_replaced: true,
+          };
+          if (!sameCanonicalValue(metadata?.dedupe, expectedDedupe)) errors.push(`${prefix} dedupe 未由候選來源欄位正確重算`);
+          if (record.staging_id !== expectedStagingId || record.material.id !== expectedStagingId) {
+            errors.push(`${prefix} staging_id 未由 dedupe key_sha256 正確衍生`);
+          }
+          stagedKindCounts[expectedDedupeIdentity.kind] = (stagedKindCounts[expectedDedupeIdentity.kind] || 0) + 1;
+        }
+        const expectedVariants = candidateRecords.map(expectedStagingVariant);
+        if (!sameCanonicalValue(metadata?.variants, expectedVariants)) {
+          errors.push(`${prefix} variants 未精確保留每筆候選來源的 key/hash/raw 值`);
+        }
+        linerSourceRecordIndex.forEach((linerRecord) => {
+          const parentId = linerRecord.parent_source_record_id;
+          if (typeof parentId !== "string" || !candidateSourceRecordIndex.has(parentId.toLowerCase())) {
+            errors.push(`${prefix} liner_option parent_source_record_id 未指向同一材料的非內襯來源列`);
+          }
+        });
+        if (orderedCandidates.length > 0) {
+          const selectedProductName = stagingNullable(selectedCandidateRecord(candidateRecords, "product_name")?.fields?.product_name);
+          const selectedArticleCode = stagingNullable(selectedCandidateRecord(candidateRecords, "article_code")?.fields?.article_code);
+          if (!sameCanonicalValue(record.material.name, selectedProductName)) errors.push(`${prefix} material.name 未對應 builder 選定 product_name`);
+          if (!sameCanonicalValue(record.material.code, selectedArticleCode)) errors.push(`${prefix} material.code 未對應 builder 選定 article_code`);
+          if (!sameCanonicalValue(record.material.category, stagingNullable(orderedCandidates[0].category))) {
+            errors.push(`${prefix} material.category 未對應代表來源列 category`);
+          }
+        }
+        const requiredComparisonFields = MATERIAL_STAGING_COMPARISON_FIELDS;
+        const selectedSourceRefs = provenance?.selected_source_refs;
+        if (!isPlainRecord(selectedSourceRefs)) {
+          errors.push(`${prefix} 缺少 selected_source_refs`);
+        } else if (!sameCanonicalValue(Object.keys(selectedSourceRefs).sort(), [...MATERIAL_SOURCE_RECORD_FIELDS].sort())) {
+          errors.push(`${prefix} selected_source_refs 欄位集合不符合固定 26 欄契約`);
+        }
+        const candidateSelectedFields = MATERIAL_SOURCE_RECORD_FIELDS.slice(0, 22);
+        const linerSelectedFields = MATERIAL_SOURCE_RECORD_FIELDS.slice(22);
+        const selectedRecordsByField = {};
+        candidateSelectedFields.forEach((field) => {
+          const selectedRecord = selectedCandidateRecord(candidateRecords, field);
+          selectedRecordsByField[field] = selectedRecord;
+          const expectedRef = stagingSourceRef(selectedRecord, field);
+          if (selectedSourceRefs?.[field] !== expectedRef) {
+            errors.push(`${prefix} selected_source_refs.${field} 未對應 builder 優先序選定來源`);
+          }
+          const matchingRefs = candidateRecords.filter((candidate) => stagingSourceRef(candidate, field) === selectedSourceRefs?.[field]);
+          if (matchingRefs.length !== 1 || matchingRefs[0]?.source_record_id !== selectedRecord?.source_record_id) {
+            errors.push(`${prefix} selected_source_refs.${field} 未唯一連到選定 source_record`);
+          }
+        });
+        const selectableLinerRecords = Array.isArray(sourceRecords)
+          ? sourceRecords.filter((sourceRecord) => isPlainRecord(sourceRecord))
+          : [];
+        linerSelectedFields.forEach((field) => {
+          const selectedRecord = selectedCandidateRecord(selectableLinerRecords, field);
+          selectedRecordsByField[field] = selectedRecord;
+          const expectedRef = stagingSourceRef(selectedRecord, field);
+          if (selectedSourceRefs?.[field] !== expectedRef) {
+            errors.push(`${prefix} selected_source_refs.${field} 未對應 builder 優先序選定來源`);
+          }
+          const matchingRefs = selectableLinerRecords.filter((candidate) => stagingSourceRef(candidate, field) === selectedSourceRefs?.[field]);
+          if (matchingRefs.length !== 1 || matchingRefs[0]?.source_record_id !== selectedRecord?.source_record_id) {
+            errors.push(`${prefix} selected_source_refs.${field} 未唯一連到選定 source_record`);
+          }
+        });
+        const selectedValue = (field) => stagingNullable(selectedRecordsByField[field]?.fields?.[field]);
+        const directMetadataMappings = [
+          [metadata?.identifiers?.product_model, selectedValue("product_model"), "identifiers.product_model"],
+          [metadata?.identifiers?.article_code, selectedValue("article_code"), "identifiers.article_code"],
+          [metadata?.identifiers?.pcces_code, selectedValue("pcces_code"), "identifiers.pcces_code"],
+          [metadata?.descriptive?.product_name, selectedValue("product_name"), "descriptive.product_name"],
+          [metadata?.descriptive?.pcces_code, selectedValue("pcces_code"), "descriptive.pcces_code"],
+          [metadata?.descriptive?.mold_spec, selectedValue("nominal_dimension"), "descriptive.mold_spec"],
+          [metadata?.descriptive?.color, selectedValue("color"), "descriptive.color"],
+          [metadata?.descriptive?.grind, selectedValue("grind"), "descriptive.grind"],
+          [metadata?.descriptive?.emboss, selectedValue("emboss"), "descriptive.emboss"],
+          [metadata?.descriptive?.application, selectedValue("application"), "descriptive.application"],
+          [metadata?.descriptive?.notes, selectedValue("notes"), "descriptive.notes"],
+          [metadata?.descriptive?.chair_leg_spec, selectedValue("chair_leg_spec"), "descriptive.chair_leg_spec"],
+          [metadata?.descriptive?.material, selectedValue("material"), "descriptive.material"],
+          [metadata?.descriptive?.stock_status, selectedValue("stock_status"), "descriptive.stock_status"],
+          [metadata?.compatible_components?.plastic_fastener, selectedValue("plastic_fastener"), "compatible_components.plastic_fastener"],
+          [metadata?.compatible_components?.stainless_fastener, selectedValue("stainless_fastener"), "compatible_components.stainless_fastener"],
+          [metadata?.compatible_components?.other, selectedValue("other_component"), "compatible_components.other"],
+          [metadata?.liner?.material_code, selectedValue("liner_material_code"), "liner.material_code"],
+          [metadata?.liner?.spec, selectedValue("liner_spec"), "liner.spec"],
+          [metadata?.liner?.wall_thickness, selectedValue("liner_wall_thickness"), "liner.wall_thickness"],
+          [metadata?.liner?.article_code, selectedValue("liner_article_code"), "liner.article_code"],
+        ];
+        directMetadataMappings.forEach(([actualValue, expectedValue, path]) => {
+          if (!sameCanonicalValue(actualValue, expectedValue)) errors.push(`${prefix} ${path} 與 builder 選定來源不一致`);
+        });
+        if (metadata?.descriptive?.surface_finish !== null) errors.push(`${prefix} descriptive.surface_finish 必須保持 NULL`);
+        const componentValues = [selectedValue("plastic_fastener"), selectedValue("stainless_fastener"), selectedValue("other_component")];
+        const distinctComponents = [];
+        const componentKeys = new Set();
+        componentValues.forEach((value) => {
+          if (value === null) return;
+          const key = canonicalStringify(value);
+          if (!componentKeys.has(key)) {
+            componentKeys.add(key);
+            distinctComponents.push(value);
+          }
+        });
+        const expectedAccessories = distinctComponents.length ? distinctComponents.join("；") : null;
+        if (!sameCanonicalValue(metadata?.descriptive?.accessories, expectedAccessories)) {
+          errors.push(`${prefix} descriptive.accessories 未由選定配件來源重算`);
+        }
+        const expectedCrossSection = provenance?.assets?.find((asset) => asset?.role === "cross_section")?.storage_uri ?? null;
+        const expectedProductImage = provenance?.assets?.find((asset) => asset?.role === "product_image")?.storage_uri ?? null;
+        if (!sameCanonicalValue(metadata?.descriptive?.cross_section, expectedCrossSection)) {
+          errors.push(`${prefix} descriptive.cross_section 未雙向對應第一個 cross_section asset`);
+        }
+        if (!sameCanonicalValue(metadata?.descriptive?.product_image, expectedProductImage)) {
+          errors.push(`${prefix} descriptive.product_image 未雙向對應第一個 product_image asset`);
+        }
+        const rawMeasurementFields = {
+          nominal_dimension: "nominal_dimension",
+          actual_dimension: "actual_dimension",
+          length: "length",
+          weight: "weight",
+          inner_geometry: "inner_geometry",
+        };
+        Object.entries(rawMeasurementFields).forEach(([measurementField, sourceField]) => {
+          if (!sameCanonicalValue(metadata?.measurements?.[measurementField]?.raw, selectedValue(sourceField))) {
+            errors.push(`${prefix} measurements.${measurementField}.raw 與 builder 選定來源不一致`);
+          }
+        });
+        const expectedMeasurementConstants = {
+          nominal_dimension: { value: null, unit: null, basis: "nominal" },
+          actual_dimension: { value: null, unit: null, basis: "actual" },
+          length: { value: null, unit: null, basis: "source" },
+          inner_geometry: { value: null, unit: null, basis: "source" },
+        };
+        Object.entries(expectedMeasurementConstants).forEach(([field, expected]) => {
+          ["value", "unit", "basis"].forEach((leaf) => {
+            if (!sameCanonicalValue(metadata?.measurements?.[field]?.[leaf], expected[leaf])) {
+              errors.push(`${prefix} measurements.${field}.${leaf} 與固定衍生規則不一致`);
+            }
+          });
+        });
+        const selectedWeightRecord = selectedRecordsByField.weight;
+        const selectedWeightRaw = selectedValue("weight");
+        const numericCellWeight = sourceNumericCellValue(selectedWeightRecord, "weight");
+        const rawWeightNumbers = stagingNumbers(selectedWeightRaw);
+        const expectedWeightValue = numericCellWeight !== null
+          ? numericCellWeight
+          : rawWeightNumbers.length === 1 ? rawWeightNumbers[0] : null;
+        const expectedWeightMeasurement = {
+          raw: selectedWeightRaw,
+          value: expectedWeightValue,
+          unit: selectedValue("weight_unit"),
+          basis: selectedValue("weight_basis"),
+        };
+        if (!sameCanonicalValue(metadata?.measurements?.weight, expectedWeightMeasurement)) {
+          errors.push(`${prefix} measurements.weight 未由 raw cell Value2 與選定單位／基準重算`);
+        }
+        const expectedSourceCategories = [];
+        const sourceCategoryKeys = new Set();
+        candidateRecords.forEach((candidate) => {
+          const category = stagingNullable(candidate.category);
+          if (category === null) return;
+          const key = canonicalStringify(category);
+          if (!sourceCategoryKeys.has(key)) {
+            sourceCategoryKeys.add(key);
+            expectedSourceCategories.push(category);
+          }
+        });
+        if (!sameCanonicalValue(metadata?.source_categories, expectedSourceCategories)) {
+          errors.push(`${prefix} source_categories 未精確保留候選來源分類`);
+        }
+        const snapshot = record.current_master_snapshot;
+        if (!hasOwn(record, "current_master_snapshot") || (snapshot !== null && !isPlainRecord(snapshot))) {
+          errors.push(`${prefix} current_master_snapshot 必須是物件或 NULL`);
+        } else if (isPlainRecord(snapshot)) {
+          if (typeof snapshot.id !== "string" || !snapshot.id.trim()) errors.push(`${prefix} current_master_snapshot.id 無效`);
+          ["catalog_model", "code", "name", "catalog_spec", "default_weight", "catalog_application"].forEach((field) => {
+            if (!hasOwn(snapshot, field)) errors.push(`${prefix} current_master_snapshot.${field} 不可省略`);
+          });
+        }
+        const masterSnapshotFields = {
+          product_model: "catalog_model",
+          article_code: "code",
+          product_name: "name",
+          nominal_dimension: "catalog_spec",
+          weight: "default_weight",
+          application: "catalog_application",
+          grind: null,
+          emboss: null,
+        };
+        requiredComparisonFields.forEach((field) => {
+          const observation = metadata?.comparisons?.[field];
+          if (!isPlainRecord(observation)) {
+            errors.push(`${prefix} 缺少 comparisons.${field}`);
+            return;
+          }
+          ["actual_value", "master_value", "source_value", "source_ref", "comparison_status"].forEach((key) => {
+            if (!hasOwn(observation, key)) errors.push(`${prefix} comparisons.${field}.${key} 不可省略`);
+          });
+          const selectedRecord = selectedRecordsByField[field];
+          const expectedRef = stagingSourceRef(selectedRecord, field);
+          const selectedRef = selectedSourceRefs?.[field];
+          if (!hasOwn(selectedSourceRefs || {}, field) || selectedRef !== expectedRef || observation.source_ref !== expectedRef) {
+            errors.push(`${prefix} comparisons.${field}.source_ref 未對應 builder 優先序選定來源與 cells alias`);
+          }
+          const matchingRefs = candidateRecords.filter((candidate) => stagingSourceRef(candidate, field) === selectedRef);
+          if (matchingRefs.length !== 1 || matchingRefs[0]?.source_record_id !== selectedRecord?.source_record_id) {
+            errors.push(`${prefix} comparisons.${field}.source_ref 未唯一連到選定 source_record`);
+          }
+          const expectedSourceValue = selectedRecord?.fields?.[field] ?? null;
+          if (!sameCanonicalValue(observation.source_value, expectedSourceValue)) {
+            errors.push(`${prefix} comparisons.${field}.source_value 與選定 source_record.fields 不一致`);
+          }
+          const snapshotField = masterSnapshotFields[field];
+          const expectedMasterValue = snapshotField && isPlainRecord(snapshot) ? stagingNullable(snapshot[snapshotField]) : null;
+          if (!sameCanonicalValue(observation.master_value, expectedMasterValue)) {
+            errors.push(`${prefix} comparisons.${field}.master_value 與 current_master_snapshot 映射不一致`);
+          }
+          const expectedActualValue = field === "nominal_dimension"
+            ? stagingNullable(metadata?.measurements?.actual_dimension?.raw)
+            : null;
+          if (!sameCanonicalValue(observation.actual_value, expectedActualValue)) {
+            errors.push(`${prefix} comparisons.${field}.actual_value 與固定 actual 映射不一致`);
+          }
+          const expectedStatus = expectedComparisonStatus(
+            field,
+            expectedSourceValue,
+            expectedMasterValue,
+            expectedActualValue,
+            selectedRecord,
+          );
+          if (!MATERIAL_STAGING_COMPARISON_STATUSES.has(observation.comparison_status)
+            || observation.comparison_status !== expectedStatus) {
+            errors.push(`${prefix} comparisons.${field}.comparison_status 未由 source/master/actual 重算`);
+          }
+        });
+        const selectedActualRecord = selectedCandidateRecord(candidateRecords, "actual_dimension");
+        const expectedActualRef = stagingSourceRef(selectedActualRecord, "actual_dimension");
+        if (!isPlainRecord(selectedSourceRefs) || !hasOwn(selectedSourceRefs, "actual_dimension")
+          || selectedSourceRefs.actual_dimension !== expectedActualRef) {
+          errors.push(`${prefix} selected_source_refs.actual_dimension 未對應 builder 優先序選定來源`);
+        } else {
+          const matchingActualRefs = candidateRecords.filter(
+            (candidate) => stagingSourceRef(candidate, "actual_dimension") === selectedSourceRefs.actual_dimension,
+          );
+          if (matchingActualRefs.length !== 1 || matchingActualRefs[0]?.source_record_id !== selectedActualRecord?.source_record_id) {
+            errors.push(`${prefix} selected_source_refs.actual_dimension 未唯一連到選定 source_record`);
+          }
+        }
+        const expectedActualRaw = selectedActualRecord?.fields?.actual_dimension ?? null;
+        if (!sameCanonicalValue(metadata?.measurements?.actual_dimension?.raw, expectedActualRaw)) {
+          errors.push(`${prefix} measurements.actual_dimension.raw 與選定來源不一致`);
+        }
+        const selectedMetadataMappings = [
+          [metadata?.identifiers?.product_model, "product_model", "identifiers.product_model"],
+          [metadata?.identifiers?.article_code, "article_code", "identifiers.article_code"],
+          [metadata?.descriptive?.product_name, "product_name", "descriptive.product_name"],
+          [metadata?.measurements?.nominal_dimension?.raw, "nominal_dimension", "measurements.nominal_dimension.raw"],
+          [metadata?.measurements?.weight?.raw, "weight", "measurements.weight.raw"],
+          [metadata?.descriptive?.application, "application", "descriptive.application"],
+          [metadata?.descriptive?.grind, "grind", "descriptive.grind"],
+          [metadata?.descriptive?.emboss, "emboss", "descriptive.emboss"],
+        ];
+        selectedMetadataMappings.forEach(([actualValue, field, path]) => {
+          const expectedValue = selectedRecordsByField[field]?.fields?.[field] ?? null;
+          if (!sameCanonicalValue(actualValue, expectedValue)) errors.push(`${prefix} ${path} 與 builder 選定來源不一致`);
+        });
+        if (isPlainRecord(snapshot)) {
+          const hasMasterComparison = requiredComparisonFields.some((field) => metadata?.comparisons?.[field]?.master_value != null);
+          if (!hasMasterComparison) errors.push(`${prefix} current_master_snapshot 存在但 comparisons 未保留任何主檔值`);
+        }
+        if (!Array.isArray(metadata?.liner_options) || metadata.liner_options.length !== linerSourceRecordIndex.size) {
+          errors.push(`${prefix} liner_options 必須與內襯 source_records 一對一`);
+        } else {
+          const linerOptionIds = new Set();
+          metadata.liner_options.forEach((linerOption, linerIndex) => {
+            const linerId = linerOption?.source_record_id;
+            const linkedLiner = typeof linerId === "string" ? linerSourceRecordIndex.get(linerId.toLowerCase()) : null;
+            if (!linkedLiner || linerOptionIds.has(linerId.toLowerCase())) {
+              errors.push(`${prefix} liner_option 第 ${linerIndex + 1} 筆未唯一對應內襯 source_record`);
+            } else {
+              linerOptionIds.add(linerId.toLowerCase());
+              if (canonicalStringify(linkedLiner) !== canonicalStringify(linerOption)) {
+                errors.push(`${prefix} liner_option 第 ${linerIndex + 1} 筆與 source_record 內容不一致`);
+              }
+            }
+          });
+          if (linerOptionIds.size !== linerSourceRecordIndex.size) errors.push(`${prefix} liner_options 未涵蓋全部內襯 source_records`);
+        }
+        if (metadata?.schema === MATERIAL_SOURCE_METADATA_SCHEMA && provenance && typeof provenance === "object" && !Array.isArray(provenance)) {
+          if (typeof provenance.workbook_file_name !== "string" || !provenance.workbook_file_name.trim()) {
+            errors.push(`${prefix} 缺少逐筆來源檔名`);
+          } else if (typeof source?.workbook_file_name === "string" && provenance.workbook_file_name !== source.workbook_file_name) {
+            errors.push(`${prefix} 逐筆來源檔名與 bundle 不一致`);
+          }
+          if (typeof provenance.workbook_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(provenance.workbook_sha256)) {
+            errors.push(`${prefix} 逐筆來源 SHA-256 無效`);
+          } else if (typeof source?.workbook_sha256 === "string" && provenance.workbook_sha256.toLowerCase() !== source.workbook_sha256.toLowerCase()) {
+            errors.push(`${prefix} 逐筆來源 SHA-256 與 bundle 不一致`);
+          }
+          if (typeof provenance.sheet !== "string" || !provenance.sheet.trim()) errors.push(`${prefix} 缺少逐筆來源工作表`);
+          if (!Number.isInteger(provenance.row) || provenance.row < 1) errors.push(`${prefix} 缺少有效逐筆來源列號`);
+          if (typeof provenance.source_record_id !== "string" || !/^[a-f0-9]{64}$/i.test(provenance.source_record_id)) {
+            errors.push(`${prefix} source_record_id 無效`);
+          }
+          if (typeof provenance.source_record_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(provenance.source_record_sha256)) {
+            errors.push(`${prefix} source_record_sha256 無效`);
+          }
+          const linkedSourceRecord = typeof provenance.source_record_id === "string"
+            ? sourceRecordIndex.get(provenance.source_record_id.toLowerCase())
+            : null;
+          const representativeSourceRecord = orderedCandidates[0] || null;
+          const actualRepresentativeIdentity = {
+            source_record_id: provenance.source_record_id,
+            source_record_sha256: provenance.source_record_sha256,
+            sheet: provenance.sheet,
+            row: provenance.row,
+            cells: provenance.cells,
+          };
+          const expectedRepresentativeIdentity = representativeSourceRecord ? {
+            source_record_id: representativeSourceRecord.source_record_id,
+            source_record_sha256: representativeSourceRecord.source_record_sha256,
+            sheet: representativeSourceRecord.source_sheet,
+            row: representativeSourceRecord.source_row,
+            cells: representativeSourceRecord.source_cells,
+          } : null;
+          if (!expectedRepresentativeIdentity || !sameCanonicalValue(actualRepresentativeIdentity, expectedRepresentativeIdentity)) {
+            errors.push(`${prefix} provenance 必須完整對應 builder 優先序的第一筆候選來源`);
+          }
+          if (!linkedSourceRecord) {
+            errors.push(`${prefix} provenance 未對應任何 source_records`);
+          } else {
+            if (linkedSourceRecord.source_record_sha256 !== provenance.source_record_sha256) {
+              errors.push(`${prefix} provenance source_record_sha256 與 source_records 不一致`);
+            }
+            if (linkedSourceRecord.source_sheet !== provenance.sheet || linkedSourceRecord.source_row !== provenance.row) {
+              errors.push(`${prefix} provenance 工作表／列號與 source_records 不一致`);
+            }
+            if (canonicalStringify(linkedSourceRecord.source_cells) !== canonicalStringify(provenance.cells)) {
+              errors.push(`${prefix} provenance cells 與 source_records 不一致`);
+            }
+          }
+          const hasCells = Array.isArray(provenance.cells)
+            ? provenance.cells.length > 0
+            : provenance.cells && typeof provenance.cells === "object" && Object.keys(provenance.cells).length > 0;
+          if (!hasCells) errors.push(`${prefix} 缺少逐筆來源儲存格定位`);
+          if (Array.isArray(provenance.assets)) {
+            const assetRefs = new Set();
+            provenance.assets.forEach((asset, assetIndex) => {
+              const assetPrefix = `${prefix} 圖片 ${assetIndex + 1}`;
+              if (typeof asset?.asset_ref !== "string" || !/^[a-f0-9]{64}$/i.test(asset.asset_ref)) errors.push(`${assetPrefix} asset_ref 無效`);
+              else if (assetRefs.has(asset.asset_ref.toLowerCase())) errors.push(`${assetPrefix} asset_ref 重複`);
+              else assetRefs.add(asset.asset_ref.toLowerCase());
+              if (typeof asset?.role !== "string" || !asset.role.trim()) errors.push(`${assetPrefix} role 無效`);
+              if (typeof asset?.sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(asset.sha256)) errors.push(`${assetPrefix} SHA-256 無效`);
+              if (asset?.mime_type !== "image/png") errors.push(`${assetPrefix} MIME 必須是 image/png`);
+              if (typeof asset?.storage_uri !== "string" || !/^assets\/[^/\\\u0000-\u001f]+\.png$/i.test(asset.storage_uri)) {
+                errors.push(`${assetPrefix} storage_uri 必須是安全的 assets 相對 PNG 路徑`);
+              }
+              if (typeof asset?.source_anchor_range !== "string" || !asset.source_anchor_range.trim()) errors.push(`${assetPrefix} 缺少來源 anchor`);
+            });
+            [
+              ["cross_section", metadata?.descriptive?.cross_section],
+              ["product_image", metadata?.descriptive?.product_image],
+            ].forEach(([role, storageUri]) => {
+              if (storageUri !== null && storageUri !== undefined && !provenance.assets.some(
+                (asset) => asset?.role === role && asset?.storage_uri === storageUri,
+              )) {
+                errors.push(`${prefix} ${role} 描述值未對應 provenance.assets`);
+              }
+            });
+          }
+        }
+      });
+      if (statistics && typeof statistics === "object" && !Array.isArray(statistics)) {
+        if (!Number.isInteger(statistics.deduplicated_material_count) || statistics.deduplicated_material_count < 1
+          || statistics.deduplicated_material_count !== bundle.records.length) {
+          errors.push("材料 staging statistics.deduplicated_material_count 與 records 不一致");
+        }
+        if (!Number.isInteger(statistics.candidate_source_row_count)
+          || statistics.candidate_source_row_count !== stagedCandidateSourceCount) {
+          errors.push("材料 staging statistics.candidate_source_row_count 與 source_records 不一致");
+        }
+        if (!Number.isInteger(statistics.liner_option_count)
+          || statistics.liner_option_count !== stagedLinerOptionCount) {
+          errors.push("材料 staging statistics.liner_option_count 與 source_records 不一致");
+        }
+        const byKind = statistics.deduplicated_by_kind;
+        if (!byKind || typeof byKind !== "object" || Array.isArray(byKind)
+          || canonicalStringify(byKind) !== canonicalStringify(stagedKindCounts)) {
+          errors.push("材料 staging statistics.deduplicated_by_kind 與 records 不一致");
+        }
+        if (inputValidations && typeof inputValidations === "object" && !Array.isArray(inputValidations)) {
+          const extractValidation = inputValidations.source_extract;
+          const fixtureValidation = inputValidations.current_fixture;
+          const assetValidation = inputValidations.assets;
+          const coverageValidation = inputValidations.bundle_asset_coverage;
+          if (extractValidation?.file_sha256 !== source?.extract_artifact_sha256
+            || extractValidation?.candidate_count !== statistics.candidate_source_row_count
+            || extractValidation?.liner_option_count !== statistics.liner_option_count
+            || extractValidation?.worksheet_count !== statistics.worksheet_count) {
+            errors.push("材料 staging source_extract validation 與 top-level 統計不一致");
+          }
+          if (fixtureValidation?.file_sha256 !== source?.current_fixture_artifact_sha256
+            || !Number.isInteger(fixtureValidation?.material_count) || fixtureValidation.material_count < 1) {
+            errors.push("材料 staging current_fixture validation 與來源不一致");
+          }
+          if (assetValidation?.inventory_count !== statistics.image_asset_count
+            || assetValidation?.copied_and_hash_verified_count !== statistics.image_asset_count) {
+            errors.push("材料 staging asset validation 與圖片統計不一致");
+          }
+          if (coverageValidation?.extract_unique_asset_count !== statistics.image_asset_count
+            || coverageValidation?.bundle_unique_asset_reference_count !== statistics.image_asset_count
+            || coverageValidation?.missing_asset_reference_count !== 0
+            || coverageValidation?.extra_asset_reference_count !== 0) {
+            errors.push("材料 staging bundle asset coverage 與圖片統計不一致");
+          }
+        }
+      }
+    }
+    return { ok: errors.length === 0, errors };
   }
 
   function finiteNumber(value, fallback = 0) {
@@ -2702,7 +3849,7 @@
       ? "unverified_legacy"
       : "unverified");
     const formulaSource = formulaSourceFor(material);
-    return migrateMaterialSpecifications({
+    return normalizeMaterialSourceMetadata(migrateMaterialSpecifications({
       ...material,
       dimension_unit: migratedDimensionUnit(material?.dimension_unit, context),
       formula_version: material?.formula_version || "legacy-v1",
@@ -2722,7 +3869,7 @@
       actual_price_version: material?.actual_price_version || material?.price_effective_date || material?.source_import || "legacy-unversioned",
       cost_price: material?.cost_price ?? "",
       cost_price_status: costStatus,
-    });
+    }));
   }
 
   function migrateQuoteItemRecord(item, material, quoteId, sectionIndex, itemIndex, context = {}) {
@@ -3578,6 +4725,8 @@
     if (material?.cost_price_status === "verified" && !hasValue(material?.cost_price)) errors.push("已確認成本價不可空白");
     const specificationsValidation = validateMaterialSpecifications(material);
     if (!specificationsValidation.ok) errors.push(`材料規格：${specificationsValidation.error}`);
+    const sourceMetadataValidation = validateMaterialSourceMetadata(material);
+    if (!sourceMetadataValidation.ok) errors.push(...sourceMetadataValidation.errors);
     return { ok: errors.length === 0, errors };
   }
 
@@ -3848,6 +4997,8 @@
     LEGACY_BACKUP_SCHEMA,
     DIMENSION_UNIT_TO_CM,
     MATERIAL_SPECIFICATIONS_SCHEMA,
+    MATERIAL_SOURCE_METADATA_SCHEMA,
+    MATERIAL_MASTER_STAGING_BUNDLE_SCHEMA,
     MATERIAL_SPEC_ERROR_CODES,
     MATERIAL_CATEGORIES_SCHEMA,
     MATERIAL_CATEGORY_ERROR_CODES,
@@ -3889,6 +5040,7 @@
     initializeExcelLaborDetail,
     migrateAppState,
     migrateMaterialCategories,
+    normalizeMaterialSourceMetadata,
     migrateMaterialSpecifications,
     migrateQuoteForSchema,
     nextQuoteNo,
@@ -3909,6 +5061,8 @@
     validateExcelCalculationSnapshot,
     validateMaterialCategories,
     validateMaterialForPersistence,
+    validateMaterialSourceMetadata,
+    validateMaterialMasterStagingBundle,
     validateMaterialSpecifications,
     validatePreparationReadiness,
     validateQuoteNumericPolicy,

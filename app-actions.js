@@ -649,6 +649,22 @@ window.saveMaterial = function (event, materialId) {
     notes: data.notes,
     is_active: Boolean(data.is_active),
   });
+  if (existing?.material_source_metadata && window.MaterialSourceWorkflow?.applyMaterialSourceReview) {
+    const reviewInput = { review_status: data.source_review_status || "review_required" };
+    window.MaterialSourceWorkflow.REVIEW_FIELDS.forEach((field) => {
+      reviewInput[field] = data[`source_review_${field}`];
+    });
+    const reviewResult = window.MaterialSourceWorkflow.applyMaterialSourceReview(payload, reviewInput);
+    if (!reviewResult.ok) {
+      setToast("來源尺寸、型號或花色格式有誤，資料未變更");
+      return reviewResult;
+    }
+    payload.material_source_metadata = reviewResult.material.material_source_metadata;
+    if (window.MaterialSourceWorkflow.materialSourceCanBeActivated
+      && !window.MaterialSourceWorkflow.materialSourceCanBeActivated(payload)) {
+      payload.is_active = false;
+    }
+  }
   const materialValidation = MaterialsQuoteDomain.validateMaterialForPersistence(payload);
   if (!materialValidation.ok) {
     setToast(materialValidation.errors[0]);
@@ -688,6 +704,9 @@ window.saveMaterial = function (event, materialId) {
     ["labor_unit_price", "工資單價"],
     ["is_active", "啟用狀態"],
   ]);
+  if (JSON.stringify(existing?.material_source_metadata || null) !== JSON.stringify(payload.material_source_metadata || null)) {
+    changed.push("來源尺寸／型號／花色");
+  }
   logRecordChange("materials", existing ? "update" : "create", payload, existing && changed.length ? `變更欄位：${changed.join("、")}` : `編號：${payload.code || "未填"}`);
   go("/materials");
   setToast(materialId ? "材料已更新" : "材料已建立");
@@ -1261,6 +1280,15 @@ window.setQuotePicker = function (type, value) {
     if (tpl) draft.sections.forEach((section) => (section.laborItems = JSON.parse(JSON.stringify(tpl.laborItems))));
   }
   if (type === "material" && ui.editingMaterial) {
+    const mat = materialById(value);
+    const canParticipateInQuotes = !mat || (
+      window.MaterialSourceWorkflow?.materialSourceCanParticipateInQuotes?.(mat)
+      ?? mat.is_active === true
+    );
+    if (!canParticipateInQuotes) {
+      setToast("此材料尚未核准或已停用，不能加入報價");
+      return { ok: false, code: "MATERIAL_SOURCE_NOT_QUOTE_ELIGIBLE" };
+    }
     const previous = draft.sections[ui.editingMaterial.sectionIndex].items[ui.editingMaterial.itemIndex];
     if (previous?.line_id) {
       delete ui.quoteCatalogSelections[previous.line_id];
@@ -1268,7 +1296,6 @@ window.setQuotePicker = function (type, value) {
       delete ui.quoteSpecificationSelections[previous.line_id];
       delete ui.quoteSpecificationDraftSelections[previous.line_id];
     }
-    const mat = materialById(value);
     const item = mat ? itemFromMaterial(mat.id) : blankItem();
     if (mat) {
       item.thickness = "";
