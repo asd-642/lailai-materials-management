@@ -39,6 +39,7 @@
     WORKING_STATE_SCHEMA_INVALID: "共享資料格式未通過安全驗證，未儲存任何變更",
     WORKING_STATE_FORBIDDEN_SECRET_KEY: "候選資料含禁止的憑證欄位，已拒絕送出",
     WORKING_STATE_CACHE_DEGRADED: "本機離線快取不可用；線上編輯仍可使用，重新整理後會重新載入遠端資料",
+    WORKING_STATE_STATEMENT_TIMEOUT: "遠端儲存逾時且交易已取消；未寫入變更，也不會自動重試",
     SAVE_OUTCOME_UNKNOWN: "遠端寫入結果無法確認；已停止修改並保留最後確認版本",
   });
 
@@ -191,7 +192,10 @@
       let value = null;
       try { value = await response.json(); } catch (error) { value = null; }
       if (response.ok === true) return Object.freeze({ ok: true, status: Number(response.status), value });
-      const code = value && typeof value === "object" && !Array.isArray(value) ? String(value.code || "") : "";
+      const rawCode = value && typeof value === "object" && !Array.isArray(value) ? String(value.code || "") : "";
+      const code = saveRequest && Number(response.status) === 500 && rawCode === "57014"
+        ? "WORKING_STATE_STATEMENT_TIMEOUT"
+        : rawCode;
       return resultError(code || `WORKING_STATE_HTTP_${Number(response.status) || 0}`, { status: Number(response.status) || 0 });
     }
 
@@ -206,6 +210,85 @@
         p_expected_version: expectedVersion,
         p_state: state,
       }, true),
+      patchMaterial: ({
+        organizationId, organizationSlug, expectedVersion, materialId,
+        expectedMaterialSha256, material, workLog, updatedAt, expectedStateSha256,
+      }) => rpc("compare_and_save_shared_material_v1", {
+        p_organization_id: organizationId,
+        p_organization_slug: organizationSlug,
+        p_expected_version: expectedVersion,
+        p_material_id: materialId,
+        p_expected_material_sha256: expectedMaterialSha256,
+        p_material: material,
+        p_work_log: workLog,
+        p_updated_at: updatedAt,
+        p_expected_state_sha256: expectedStateSha256,
+      }, true),
+    });
+  }
+
+  function objectWithout(value, omittedKeys) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const omitted = new Set(omittedKeys);
+    return Object.fromEntries(Object.entries(value).filter(([key]) => !omitted.has(key)));
+  }
+
+  async function buildMaterialPatch(previous, candidate, candidateHash, options = {}) {
+    if (String(options.name || "") !== "saveMaterial") return null;
+    const materialId = String(options.materialId || "");
+    if (!materialId || !previous || !candidate) return null;
+    if (canonicalStringify(previous.accounts) !== canonicalStringify(candidate.accounts)
+      || canonicalStringify(previous.bug_reports) !== canonicalStringify(candidate.bug_reports)) return null;
+
+    const previousState = previous.state;
+    const candidateState = candidate.state;
+    if (!previousState || !candidateState
+      || canonicalStringify(objectWithout(previousState, ["materials", "meta"]))
+        !== canonicalStringify(objectWithout(candidateState, ["materials", "meta"]))) return null;
+    const previousMeta = objectWithout(previousState.meta || {}, ["updated_at"]);
+    const candidateMeta = objectWithout(candidateState.meta || {}, ["updated_at"]);
+    const updatedAt = String(candidateState.meta?.updated_at || "");
+    if (canonicalStringify(previousMeta) !== canonicalStringify(candidateMeta)
+      || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(updatedAt)) return null;
+
+    const previousMaterials = previousState.materials;
+    const candidateMaterials = candidateState.materials;
+    if (!Array.isArray(previousMaterials) || !Array.isArray(candidateMaterials)
+      || previousMaterials.length !== candidateMaterials.length) return null;
+    let previousMaterial = null;
+    let candidateMaterial = null;
+    let matchCount = 0;
+    for (let index = 0; index < previousMaterials.length; index += 1) {
+      const before = previousMaterials[index];
+      const after = candidateMaterials[index];
+      if (String(before?.id || "") !== String(after?.id || "")) return null;
+      if (String(before?.id || "") === materialId) {
+        matchCount += 1;
+        previousMaterial = before;
+        candidateMaterial = after;
+      } else if (canonicalStringify(before) !== canonicalStringify(after)) return null;
+    }
+    if (matchCount !== 1 || !previousMaterial || !candidateMaterial) return null;
+
+    const previousLogs = previous.work_logs;
+    const candidateLogs = candidate.work_logs;
+    if (!Array.isArray(previousLogs) || !Array.isArray(candidateLogs)
+      || candidateLogs.length !== Math.min(previousLogs.length + 1, 500)
+      || canonicalStringify(candidateLogs.slice(1)) !== canonicalStringify(previousLogs.slice(0, 499))) return null;
+    const workLog = candidateLogs[0];
+    if (!workLog || typeof workLog !== "object" || Array.isArray(workLog)
+      || String(workLog.id || "") === ""
+      || String(workLog.action || "") !== "update"
+      || String(workLog.entityType || "") !== "materials"
+      || String(workLog.entityId || "") !== materialId) return null;
+
+    return Object.freeze({
+      materialId,
+      expectedMaterialSha256: await sha256Canonical(previousMaterial),
+      material: clone(candidateMaterial),
+      workLog: clone(workLog),
+      updatedAt,
+      expectedStateSha256: candidateHash,
     });
   }
 
@@ -274,6 +357,9 @@
     let inFlight = false;
     let cacheDegraded = false;
     let cacheCode = "";
+    let lastSaveCode = "";
+    let lastSaveStatus = 0;
+    let lastSavePhase = "idle";
 
     function publicStatus() {
       return Object.freeze({
@@ -290,8 +376,17 @@
         hasObservedRemote: Boolean(observedRemote),
         cacheDegraded,
         cacheCode,
+        lastSaveCode,
+        lastSaveStatus,
+        lastSavePhase,
         inFlight,
       });
+    }
+
+    function recordSaveStatus(nextCode, nextStatus, nextPhase) {
+      lastSaveCode = String(nextCode || "");
+      lastSaveStatus = Number(nextStatus) || 0;
+      lastSavePhase = String(nextPhase || "idle");
     }
 
     function setStatus(nextPhase, nextCode = "", nextMessage = "") {
@@ -397,15 +492,27 @@
       }
     }
 
-    async function verifiedSave(candidate, candidateHash, expectedVersion) {
+    async function verifiedSave(previous, candidate, candidateHash, expectedVersion, options) {
       let saved;
+      let materialPatch = null;
       try {
-        saved = await remote.save({
-          organizationId: safeConfig.organizationId,
-          organizationSlug: safeConfig.organizationSlug,
-          expectedVersion,
-          state: clone(candidate),
-        });
+        materialPatch = typeof remote.patchMaterial === "function"
+          ? await buildMaterialPatch(previous, candidate, candidateHash, options)
+          : null;
+        recordSaveStatus("", 0, materialPatch ? "material-patch-pending" : "full-state-pending");
+        saved = materialPatch
+          ? await remote.patchMaterial({
+            organizationId: safeConfig.organizationId,
+            organizationSlug: safeConfig.organizationSlug,
+            expectedVersion,
+            ...materialPatch,
+          })
+          : await remote.save({
+            organizationId: safeConfig.organizationId,
+            organizationSlug: safeConfig.organizationSlug,
+            expectedVersion,
+            state: clone(candidate),
+          });
       } catch (error) {
         saved = resultError("SAVE_OUTCOME_UNKNOWN", { status: 0 });
       }
@@ -418,16 +525,20 @@
           if (readback.ok
             && Number(readback.envelope.version) === expectedVersion + 1
             && readback.envelope.state_sha256 === candidateHash) {
+            recordSaveStatus("WORKING_STATE_SAVE_CONFIRMED_BY_READBACK", Number(saved.status) || 0, "readback-confirmed");
             return Object.freeze({ ok: true, envelope: readback.envelope, confirmedByReadback: true });
           }
           if (readback.ok) observedRemote = readback;
+          recordSaveStatus("WORKING_STATE_SAVE_CONTRACT_INVALID", Number(saved.status) || 0, "readback-rejected");
           return resultError("WORKING_STATE_SAVE_CONTRACT_INVALID");
         }
+        recordSaveStatus("WORKING_STATE_SAVE_CONFIRMED", Number(saved.status) || 0, "rpc-confirmed");
         return Object.freeze({ ok: true, envelope: saved.value, confirmedByReadback: false });
       }
       const status = Number(saved?.status) || 0;
       const saveCode = String(saved?.code || "");
       if (status === 409 && saveCode !== "WORKING_STATE_VERSION_CONFLICT" && saveCode !== "WORKING_STATE_VERSION_EXHAUSTED") {
+        recordSaveStatus("WORKING_STATE_SAVE_CONTRACT_INVALID", status, "rpc-rejected");
         return resultError("WORKING_STATE_SAVE_CONTRACT_INVALID");
       }
       if (saveCode === "SAVE_OUTCOME_UNKNOWN") {
@@ -435,15 +546,18 @@
         if (readback.ok
           && Number(readback.envelope.version) === expectedVersion + 1
           && readback.envelope.state_sha256 === candidateHash) {
+          recordSaveStatus("WORKING_STATE_SAVE_CONFIRMED_BY_READBACK", status, "readback-confirmed");
           return Object.freeze({ ok: true, envelope: readback.envelope, confirmedByReadback: true });
         }
         if (readback.ok) observedRemote = readback;
+        recordSaveStatus("SAVE_OUTCOME_UNKNOWN", status, "readback-unconfirmed");
         return resultError("SAVE_OUTCOME_UNKNOWN");
       }
       if (saveCode === "WORKING_STATE_VERSION_CONFLICT") {
         const latest = await readRemote();
         if (latest.ok) observedRemote = latest;
       }
+      recordSaveStatus(saveCode || "WORKING_STATE_SAVE_FAILED", status, "rpc-rejected");
       return resultError(saveCode || "WORKING_STATE_SAVE_FAILED", { status });
     }
 
@@ -484,7 +598,7 @@
         }
         const candidateHash = await sha256Canonical(candidate);
         const expectedVersion = remoteVersion;
-        const saved = await verifiedSave(candidate, candidateHash, expectedVersion);
+        const saved = await verifiedSave(previous, candidate, candidateHash, expectedVersion, options);
         if (!saved.ok) {
           pendingDraft = candidate;
           app.discardEffects?.();
@@ -762,7 +876,9 @@
               applicationProxy.notify(coordinator.status().code || "WORKING_STATE_READ_ONLY");
               return Promise.resolve(resultError("WORKING_STATE_READ_ONLY"));
             }
-            return coordinator.runSharedMutation(() => original.apply(this, args), { name });
+            const mutationOptions = { name };
+            if (name === "saveMaterial") mutationOptions.materialId = String(args[1] || "");
+            return coordinator.runSharedMutation(() => original.apply(this, args), mutationOptions);
           };
           Object.defineProperty(wrapped, "__sharedWorkingStateGateway", { value: true });
           browserRoot[name] = wrapped;
