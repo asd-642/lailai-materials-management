@@ -778,6 +778,9 @@
     let installedApplication = null;
     let effects = [];
     let hydratePromise = null;
+    let ownerVerificationPromise = null;
+    let interactivePasswordLoginInFlight = false;
+    let interactiveOwnerGateRejected = false;
     const cache = createLocalStorageCache((() => {
       try { return browserRoot.localStorage; } catch (error) { return null; }
     })());
@@ -811,10 +814,51 @@
       return Object.freeze({ ...coordinator.status(), configured: true });
     }
 
+    function passwordLoginInFlight(status) {
+      return status?.loginStage === "request-pending" || status?.loginStage === "session-established";
+    }
+
+    function preserveMutationEvent(event) {
+      if (!event || typeof event !== "object" || !event.currentTarget || typeof Proxy !== "function") return event;
+      const currentTarget = event.currentTarget;
+      return new Proxy(event, {
+        get(target, property) {
+          if (property === "currentTarget") return currentTarget;
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    }
+
+    async function verifyRestoredOwnerSession() {
+      let status = null;
+      try { status = authRuntime.status?.() || null; } catch (error) { status = null; }
+      if (!status?.signedIn) return resultError("WORKING_STATE_AUTH_REQUIRED");
+      if (status.ownerVerified) return Object.freeze({ ok: true, code: "" });
+      if (interactiveOwnerGateRejected) return resultError("WORKING_STATE_OWNER_REQUIRED");
+      if (passwordLoginInFlight(status)) {
+        return resultError("WORKING_STATE_OWNER_REQUIRED");
+      }
+      if (typeof authRuntime.verifyOwnerMembership !== "function") {
+        return resultError("WORKING_STATE_OWNER_REQUIRED");
+      }
+      if (!ownerVerificationPromise) {
+        ownerVerificationPromise = Promise.resolve()
+          .then(() => authRuntime.verifyOwnerMembership())
+          .catch(() => resultError("WORKING_STATE_OWNER_REQUIRED"))
+          .finally(() => { ownerVerificationPromise = null; });
+      }
+      const verified = await ownerVerificationPromise;
+      try { status = authRuntime.status?.() || null; } catch (error) { status = null; }
+      return verified?.ok === true && status?.signedIn && status?.ownerVerified
+        ? Object.freeze({ ok: true, code: "" })
+        : resultError(status?.signedIn ? "WORKING_STATE_OWNER_REQUIRED" : "WORKING_STATE_AUTH_REQUIRED");
+    }
+
     async function hydrateIfAuthorized() {
-      const status = authRuntime.status?.();
-      if (!status?.signedIn || !status?.ownerVerified) {
-        coordinator.deactivate(status?.signedIn ? "WORKING_STATE_OWNER_REQUIRED" : "WORKING_STATE_AUTH_REQUIRED");
+      const authorization = await verifyRestoredOwnerSession();
+      if (!authorization.ok) {
+        coordinator.deactivate(authorization.code);
         return runtimeStatus();
       }
       if (coordinator.status().phase === "ready") return runtimeStatus();
@@ -832,11 +876,26 @@
       return resultError(denied);
     }
 
-    function runAuthorizedCoordinatorMutation(invoke, denialResultCode = "") {
+    async function prepareAuthorizedMutation() {
+      const restored = await verifyRestoredOwnerSession();
+      if (!restored.ok) {
+        coordinator.denyMutation(restored.code);
+        return restored;
+      }
+      if (!coordinator.status().canMutate) await hydrateIfAuthorized();
       const authorization = canonicalMutationAuthorization();
+      if (!authorization.ok) return authorization;
+      if (!coordinator.status().canMutate) {
+        return resultError(coordinator.status().code || "WORKING_STATE_READ_ONLY");
+      }
+      return Object.freeze({ ok: true, code: "" });
+    }
+
+    async function runAuthorizedCoordinatorMutation(invoke, denialResultCode = "") {
+      const authorization = await prepareAuthorizedMutation();
       if (!authorization.ok) {
         applicationProxy.notify(authorization.code);
-        return Promise.resolve(resultError(denialResultCode || authorization.code));
+        return resultError(denialResultCode || authorization.code);
       }
       return invoke();
     }
@@ -921,24 +980,25 @@
           if (typeof original !== "function" || original.__sharedWorkingStateGateway) return;
           const wrapped = function (...args) {
             if (coordinator.activeDraft()) return original.apply(this, args);
-            const authorization = canonicalMutationAuthorization();
-            if (!authorization.ok) {
-              if (name === "login" || name === "logout") return original.apply(this, args);
-              const event = args[0];
-              if (event && typeof event.preventDefault === "function") event.preventDefault();
-              applicationProxy.notify(authorization.code);
-              return Promise.resolve(authorization);
-            }
-            if (!coordinator.status().canMutate) {
-              if (name === "login" || name === "logout") return original.apply(this, args);
-              const event = args[0];
-              if (event && typeof event.preventDefault === "function") event.preventDefault();
-              applicationProxy.notify(coordinator.status().code || "WORKING_STATE_READ_ONLY");
-              return Promise.resolve(resultError("WORKING_STATE_READ_ONLY"));
-            }
+            if (name === "login" || name === "logout") return original.apply(this, args);
+            let authStatus = null;
+            try { authStatus = authRuntime.status?.() || null; } catch (error) { authStatus = null; }
             const mutationOptions = { name };
             if (name === "saveMaterial") mutationOptions.materialId = String(args[1] || "");
-            return coordinator.runSharedMutation(() => original.apply(this, args), mutationOptions);
+            if (authStatus?.signedIn && authStatus?.ownerVerified && coordinator.status().canMutate) {
+              return coordinator.runSharedMutation(() => original.apply(this, args), mutationOptions);
+            }
+            const event = args[0];
+            if (event && typeof event.preventDefault === "function") event.preventDefault();
+            const deferredArgs = [...args];
+            deferredArgs[0] = preserveMutationEvent(event);
+            return prepareAuthorizedMutation().then((authorization) => {
+              if (!authorization.ok) {
+                applicationProxy.notify(authorization.code);
+                return authorization;
+              }
+              return coordinator.runSharedMutation(() => original.apply(this, deferredArgs), mutationOptions);
+            });
           };
           Object.defineProperty(wrapped, "__sharedWorkingStateGateway", { value: true });
           browserRoot[name] = wrapped;
@@ -946,7 +1006,34 @@
         return true;
       },
       async initialize() {
-        browserRoot.addEventListener?.("materials-quote-supabase-auth-change", () => {
+        browserRoot.addEventListener?.("materials-quote-supabase-auth-change", (event) => {
+          const status = event?.detail || null;
+          if (passwordLoginInFlight(status)) {
+            interactivePasswordLoginInFlight = true;
+            interactiveOwnerGateRejected = false;
+            installedApplication?.render?.();
+            return;
+          }
+          if (interactivePasswordLoginInFlight && status?.loginStage === "owner-gate-complete") {
+            interactivePasswordLoginInFlight = false;
+            interactiveOwnerGateRejected = Boolean(status?.signedIn && !status?.ownerVerified);
+            if (interactiveOwnerGateRejected) {
+              installedApplication?.render?.();
+              return;
+            }
+          }
+          if (!status?.signedIn) {
+            interactivePasswordLoginInFlight = false;
+            interactiveOwnerGateRejected = false;
+          } else if (status?.ownerVerified) {
+            interactiveOwnerGateRejected = false;
+          } else if (status?.code !== "SUPABASE_AUTH_OWNER_GATE_REQUIRED") {
+            installedApplication?.render?.();
+            return;
+          } else {
+            interactivePasswordLoginInFlight = false;
+            interactiveOwnerGateRejected = false;
+          }
           hydrateIfAuthorized().finally(() => installedApplication?.render?.());
         });
         await hydrateIfAuthorized();
