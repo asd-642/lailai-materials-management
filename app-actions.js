@@ -3713,6 +3713,14 @@ function installSharedWorkingStateGateway() {
   const runtime = window.MaterialsQuoteSharedWorkingStateRuntime;
   if (!runtime?.requiresGateway?.()) return Promise.resolve(runtime?.status?.() || null);
   runtime.installApplication({
+    prepareDraft(payload) {
+      const prepared = MaterialsQuoteDomain.deepClone(payload);
+      prepared.state = normalizeAppState(MaterialsQuoteDomain.deepClone(prepared.state));
+      if (Array.isArray(prepared.work_logs)) {
+        prepared.work_logs = prepared.work_logs.map((entry) => window.AuthEventContract?.canonicalAuthEvent(entry) || entry);
+      }
+      return prepared;
+    },
     beginDraft(payload) {
       sharedWorkingStateUiSnapshot = ui;
       ui = MaterialsQuoteDomain.deepClone(ui);

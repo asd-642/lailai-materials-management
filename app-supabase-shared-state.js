@@ -233,48 +233,60 @@
     return Object.fromEntries(Object.entries(value).filter(([key]) => !omitted.has(key)));
   }
 
-  async function buildMaterialPatch(previous, candidate, candidateHash, options = {}) {
-    if (String(options.name || "") !== "saveMaterial") return null;
-    const materialId = String(options.materialId || "");
-    if (!materialId || !previous || !candidate) return null;
-    if (canonicalStringify(previous.accounts) !== canonicalStringify(candidate.accounts)
-      || canonicalStringify(previous.bug_reports) !== canonicalStringify(candidate.bug_reports)) return null;
+  async function buildMaterialPatch(previous, baseline, candidate) {
+    if (!previous || !baseline || !candidate) return null;
+    if (canonicalStringify(baseline.accounts) !== canonicalStringify(candidate.accounts)
+      || canonicalStringify(baseline.bug_reports) !== canonicalStringify(candidate.bug_reports)) return null;
 
     const previousState = previous.state;
+    const baselineState = baseline.state;
     const candidateState = candidate.state;
-    if (!previousState || !candidateState
-      || canonicalStringify(objectWithout(previousState, ["materials", "meta"]))
+    if (!previousState || !baselineState || !candidateState
+      || canonicalStringify(objectWithout(baselineState, ["materials", "meta"]))
         !== canonicalStringify(objectWithout(candidateState, ["materials", "meta"]))) return null;
-    const previousMeta = objectWithout(previousState.meta || {}, ["updated_at"]);
+    const baselineMeta = objectWithout(baselineState.meta || {}, ["updated_at"]);
     const candidateMeta = objectWithout(candidateState.meta || {}, ["updated_at"]);
     const updatedAt = String(candidateState.meta?.updated_at || "");
-    if (canonicalStringify(previousMeta) !== canonicalStringify(candidateMeta)
+    if (canonicalStringify(baselineMeta) !== canonicalStringify(candidateMeta)
       || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(updatedAt)) return null;
 
     const previousMaterials = previousState.materials;
+    const baselineMaterials = baselineState.materials;
     const candidateMaterials = candidateState.materials;
-    if (!Array.isArray(previousMaterials) || !Array.isArray(candidateMaterials)
-      || previousMaterials.length !== candidateMaterials.length) return null;
+    if (!Array.isArray(previousMaterials) || !Array.isArray(baselineMaterials) || !Array.isArray(candidateMaterials)
+      || previousMaterials.length !== baselineMaterials.length
+      || baselineMaterials.length !== candidateMaterials.length) return null;
     let previousMaterial = null;
     let candidateMaterial = null;
-    let matchCount = 0;
+    let materialId = "";
+    let changedCount = 0;
+    let changedIndex = -1;
+    const materialIds = new Set();
     for (let index = 0; index < previousMaterials.length; index += 1) {
-      const before = previousMaterials[index];
+      const remoteBefore = previousMaterials[index];
+      const before = baselineMaterials[index];
       const after = candidateMaterials[index];
-      if (String(before?.id || "") !== String(after?.id || "")) return null;
-      if (String(before?.id || "") === materialId) {
-        matchCount += 1;
-        previousMaterial = before;
+      const remoteId = String(remoteBefore?.id || "");
+      const baselineId = String(before?.id || "");
+      const candidateId = String(after?.id || "");
+      if (!remoteId || materialIds.has(remoteId) || remoteId !== baselineId || baselineId !== candidateId) return null;
+      materialIds.add(remoteId);
+      if (canonicalStringify(before) !== canonicalStringify(after)) {
+        changedCount += 1;
+        changedIndex = index;
+        materialId = remoteId;
+        previousMaterial = remoteBefore;
         candidateMaterial = after;
-      } else if (canonicalStringify(before) !== canonicalStringify(after)) return null;
+      }
     }
-    if (matchCount !== 1 || !previousMaterial || !candidateMaterial) return null;
+    if (changedCount !== 1 || changedIndex < 0 || !previousMaterial || !candidateMaterial) return null;
 
     const previousLogs = previous.work_logs;
+    const baselineLogs = baseline.work_logs;
     const candidateLogs = candidate.work_logs;
-    if (!Array.isArray(previousLogs) || !Array.isArray(candidateLogs)
-      || candidateLogs.length !== Math.min(previousLogs.length + 1, 500)
-      || canonicalStringify(candidateLogs.slice(1)) !== canonicalStringify(previousLogs.slice(0, 499))) return null;
+    if (!Array.isArray(previousLogs) || !Array.isArray(baselineLogs) || !Array.isArray(candidateLogs)
+      || candidateLogs.length !== Math.min(baselineLogs.length + 1, 500)
+      || canonicalStringify(candidateLogs.slice(1)) !== canonicalStringify(baselineLogs.slice(0, 499))) return null;
     const workLog = candidateLogs[0];
     if (!workLog || typeof workLog !== "object" || Array.isArray(workLog)
       || String(workLog.id || "") === ""
@@ -282,13 +294,24 @@
       || String(workLog.entityType || "") !== "materials"
       || String(workLog.entityId || "") !== materialId) return null;
 
+    const confirmedCandidate = clone(previous);
+    if (!confirmedCandidate.state?.meta
+      || typeof confirmedCandidate.state.meta !== "object"
+      || Array.isArray(confirmedCandidate.state.meta)
+      || !("updated_at" in confirmedCandidate.state.meta)) return null;
+    confirmedCandidate.state.materials[changedIndex] = clone(candidateMaterial);
+    confirmedCandidate.state.meta.updated_at = updatedAt;
+    confirmedCandidate.work_logs = [clone(workLog), ...clone(previousLogs)].slice(0, 500);
+    if (!validatePayload(confirmedCandidate).ok) return null;
+
     return Object.freeze({
       materialId,
       expectedMaterialSha256: await sha256Canonical(previousMaterial),
       material: clone(candidateMaterial),
       workLog: clone(workLog),
       updatedAt,
-      expectedStateSha256: candidateHash,
+      expectedStateSha256: await sha256Canonical(confirmedCandidate),
+      confirmedCandidate,
     });
   }
 
@@ -360,6 +383,9 @@
     let lastSaveCode = "";
     let lastSaveStatus = 0;
     let lastSavePhase = "idle";
+    let lastSaveTransport = "";
+    let compactRpcCount = 0;
+    let legacyFullRpcCount = 0;
 
     function publicStatus() {
       return Object.freeze({
@@ -379,6 +405,9 @@
         lastSaveCode,
         lastSaveStatus,
         lastSavePhase,
+        lastSaveTransport,
+        compactRpcCount,
+        legacyFullRpcCount,
         inFlight,
       });
     }
@@ -492,27 +521,37 @@
       }
     }
 
-    async function verifiedSave(previous, candidate, candidateHash, expectedVersion, options) {
+    async function verifiedSave(previous, baseline, candidate, candidateHash, expectedVersion) {
       let saved;
       let materialPatch = null;
+      let expectedSaveHash = candidateHash;
+      let confirmedCandidate = candidate;
       try {
         materialPatch = typeof remote.patchMaterial === "function"
-          ? await buildMaterialPatch(previous, candidate, candidateHash, options)
+          ? await buildMaterialPatch(previous, baseline, candidate)
           : null;
+        expectedSaveHash = materialPatch?.expectedStateSha256 || candidateHash;
+        confirmedCandidate = materialPatch?.confirmedCandidate || candidate;
+        lastSaveTransport = materialPatch ? "compact-material-rpc" : "legacy-full-rpc";
+        if (materialPatch) compactRpcCount += 1;
+        else legacyFullRpcCount += 1;
         recordSaveStatus("", 0, materialPatch ? "material-patch-pending" : "full-state-pending");
-        saved = materialPatch
-          ? await remote.patchMaterial({
+        if (materialPatch) {
+          const { confirmedCandidate: _confirmedCandidate, ...materialRequest } = materialPatch;
+          saved = await remote.patchMaterial({
             organizationId: safeConfig.organizationId,
             organizationSlug: safeConfig.organizationSlug,
             expectedVersion,
-            ...materialPatch,
-          })
-          : await remote.save({
+            ...materialRequest,
+          });
+        } else {
+          saved = await remote.save({
             organizationId: safeConfig.organizationId,
             organizationSlug: safeConfig.organizationSlug,
             expectedVersion,
             state: clone(candidate),
           });
+        }
       } catch (error) {
         saved = resultError("SAVE_OUTCOME_UNKNOWN", { status: 0 });
       }
@@ -520,20 +559,20 @@
         const validation = validateRemoteEnvelope(saved.value, safeConfig, false);
         if (!validation.ok
           || Number(saved.value.version) !== expectedVersion + 1
-          || saved.value.state_sha256 !== candidateHash) {
+          || saved.value.state_sha256 !== expectedSaveHash) {
           const readback = await readRemote();
           if (readback.ok
             && Number(readback.envelope.version) === expectedVersion + 1
-            && readback.envelope.state_sha256 === candidateHash) {
+            && readback.envelope.state_sha256 === expectedSaveHash) {
             recordSaveStatus("WORKING_STATE_SAVE_CONFIRMED_BY_READBACK", Number(saved.status) || 0, "readback-confirmed");
-            return Object.freeze({ ok: true, envelope: readback.envelope, confirmedByReadback: true });
+            return Object.freeze({ ok: true, envelope: readback.envelope, confirmedPayload: readback.payload, confirmedByReadback: true });
           }
           if (readback.ok) observedRemote = readback;
           recordSaveStatus("WORKING_STATE_SAVE_CONTRACT_INVALID", Number(saved.status) || 0, "readback-rejected");
           return resultError("WORKING_STATE_SAVE_CONTRACT_INVALID");
         }
         recordSaveStatus("WORKING_STATE_SAVE_CONFIRMED", Number(saved.status) || 0, "rpc-confirmed");
-        return Object.freeze({ ok: true, envelope: saved.value, confirmedByReadback: false });
+        return Object.freeze({ ok: true, envelope: saved.value, confirmedPayload: clone(confirmedCandidate), confirmedByReadback: false });
       }
       const status = Number(saved?.status) || 0;
       const saveCode = String(saved?.code || "");
@@ -545,9 +584,9 @@
         const readback = await readRemote();
         if (readback.ok
           && Number(readback.envelope.version) === expectedVersion + 1
-          && readback.envelope.state_sha256 === candidateHash) {
+          && readback.envelope.state_sha256 === expectedSaveHash) {
           recordSaveStatus("WORKING_STATE_SAVE_CONFIRMED_BY_READBACK", status, "readback-confirmed");
-          return Object.freeze({ ok: true, envelope: readback.envelope, confirmedByReadback: true });
+          return Object.freeze({ ok: true, envelope: readback.envelope, confirmedPayload: readback.payload, confirmedByReadback: true });
         }
         if (readback.ok) observedRemote = readback;
         recordSaveStatus("SAVE_OUTCOME_UNKNOWN", status, "readback-unconfirmed");
@@ -569,7 +608,23 @@
       if (inFlight || activeDraft) return resultError("WORKING_STATE_IN_FLIGHT");
       inFlight = true;
       const previous = clone(confirmedPayload);
-      activeDraft = clone(confirmedPayload);
+      try {
+        const prepared = typeof app.prepareDraft === "function" ? app.prepareDraft(clone(previous)) : previous;
+        activeDraft = clone(prepared);
+      } catch (error) {
+        activeDraft = null;
+        inFlight = false;
+        app.notify?.("WORKING_STATE_SCHEMA_INVALID");
+        return resultError("WORKING_STATE_SCHEMA_INVALID");
+      }
+      const preparedValidation = validatePayload(activeDraft);
+      if (!preparedValidation.ok) {
+        activeDraft = null;
+        inFlight = false;
+        app.notify?.(preparedValidation.code);
+        return preparedValidation;
+      }
+      const baseline = clone(activeDraft);
       app.beginDraft?.(activeDraft, String(options.name || "mutation"));
       let handlerResult;
       try {
@@ -585,7 +640,7 @@
       app.endDraft?.(clone(previous));
       activeDraft = null;
       try {
-        if (canonicalStringify(candidate) === canonicalStringify(previous)) {
+        if (canonicalStringify(candidate) === canonicalStringify(baseline)) {
           app.flushEffects?.();
           return Object.freeze({ ok: true, code: "", unchanged: true, value: handlerResult });
         }
@@ -598,7 +653,7 @@
         }
         const candidateHash = await sha256Canonical(candidate);
         const expectedVersion = remoteVersion;
-        const saved = await verifiedSave(previous, candidate, candidateHash, expectedVersion, options);
+        const saved = await verifiedSave(previous, baseline, candidate, candidateHash, expectedVersion);
         if (!saved.ok) {
           pendingDraft = candidate;
           app.discardEffects?.();
@@ -607,7 +662,7 @@
           app.notify?.(saved.code);
           return saved;
         }
-        const committed = await commit(candidate, saved.envelope, "ready");
+        const committed = await commit(saved.confirmedPayload || candidate, saved.envelope, "ready");
         if (!committed.ok) {
           app.discardEffects?.();
           return committed;
@@ -733,6 +788,11 @@
       fetchImpl: typeof browserRoot.fetch === "function" ? browserRoot.fetch.bind(browserRoot) : null,
     });
     const applicationProxy = {
+      prepareDraft(payload) {
+        return typeof installedApplication?.prepareDraft === "function"
+          ? installedApplication.prepareDraft(payload)
+          : payload;
+      },
       beginDraft(payload, name) { installedApplication?.beginDraft?.(payload, name); },
       endDraft(previous) { installedApplication?.endDraft?.(previous); },
       commitConfirmed(payload) { return installedApplication?.commitConfirmed?.(payload) !== false; },
