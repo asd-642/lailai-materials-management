@@ -38,6 +38,7 @@
     WORKING_STATE_EXPECTED_VERSION_INVALID: "共享資料版本參數不合法，已停止寫入",
     WORKING_STATE_SCHEMA_INVALID: "共享資料格式未通過安全驗證，未儲存任何變更",
     WORKING_STATE_FORBIDDEN_SECRET_KEY: "候選資料含禁止的憑證欄位，已拒絕送出",
+    WORKING_STATE_CACHE_DEGRADED: "本機離線快取不可用；線上編輯仍可使用，重新整理後會重新載入遠端資料",
     SAVE_OUTCOME_UNKNOWN: "遠端寫入結果無法確認；已停止修改並保留最後確認版本",
   });
 
@@ -209,13 +210,28 @@
   }
 
   function createLocalStorageCache(storage) {
+    let lastWriteCode = "";
     return Object.freeze({
       read() {
         try { return JSON.parse(storage?.getItem(CACHE_KEY) || "null"); } catch (error) { return null; }
       },
       write(value) {
-        try { storage?.setItem(CACHE_KEY, JSON.stringify(value)); return true; } catch (error) { return false; }
+        if (!storage || typeof storage.setItem !== "function") {
+          lastWriteCode = "WORKING_STATE_CACHE_STORAGE_UNAVAILABLE";
+          return false;
+        }
+        try {
+          storage.setItem(CACHE_KEY, JSON.stringify(value));
+          lastWriteCode = "";
+          return true;
+        } catch (error) {
+          lastWriteCode = error?.name === "QuotaExceededError"
+            ? "WORKING_STATE_CACHE_QUOTA_EXCEEDED"
+            : "WORKING_STATE_CACHE_WRITE_FAILED";
+          return false;
+        }
       },
+      lastWriteCode: () => lastWriteCode,
       clear() {
         try { storage?.removeItem(CACHE_KEY); } catch (error) { /* fail closed in memory */ }
       },
@@ -256,6 +272,8 @@
     let pendingDraft = null;
     let observedRemote = null;
     let inFlight = false;
+    let cacheDegraded = false;
+    let cacheCode = "";
 
     function publicStatus() {
       return Object.freeze({
@@ -270,6 +288,8 @@
         sourceCanonicalSha256,
         hasPendingDraft: Boolean(pendingDraft),
         hasObservedRemote: Boolean(observedRemote),
+        cacheDegraded,
+        cacheCode,
         inFlight,
       });
     }
@@ -292,12 +312,9 @@
         sourceCanonicalSha256: String(envelope.source_canonical_sha256),
         payload: clone(payloadValue),
       };
-      if (confirmedCache?.write(record) !== true) {
-        setStatus("cache-write-failed", "WORKING_STATE_CACHE_WRITE_FAILED");
-        app.notify?.("WORKING_STATE_CACHE_WRITE_FAILED");
-        return resultError("WORKING_STATE_CACHE_WRITE_FAILED");
-      }
-      if (app.commitConfirmed?.(clone(payloadValue)) === false) {
+      let applicationCommitted = false;
+      try { applicationCommitted = app.commitConfirmed?.(clone(payloadValue)) !== false; } catch (error) { applicationCommitted = false; }
+      if (!applicationCommitted) {
         setStatus("cache-write-failed", "WORKING_STATE_APPLICATION_COMMIT_FAILED");
         return resultError("WORKING_STATE_APPLICATION_COMMIT_FAILED");
       }
@@ -307,8 +324,25 @@
       sourceCanonicalSha256 = String(envelope.source_canonical_sha256);
       pendingDraft = null;
       observedRemote = null;
-      setStatus(nextPhase, nextPhase === "ready" ? "" : "WORKING_STATE_NETWORK_UNAVAILABLE");
-      return Object.freeze({ ok: true, code: "", version: remoteVersion, stateSha256 });
+      let cacheWritten = false;
+      try { cacheWritten = await confirmedCache?.write(record) === true; } catch (error) { cacheWritten = false; }
+      cacheDegraded = !cacheWritten;
+      cacheCode = cacheWritten
+        ? ""
+        : String(confirmedCache?.lastWriteCode?.() || "WORKING_STATE_CACHE_WRITE_FAILED");
+      const nextCode = nextPhase === "ready"
+        ? (cacheDegraded ? "WORKING_STATE_CACHE_DEGRADED" : "")
+        : "WORKING_STATE_NETWORK_UNAVAILABLE";
+      setStatus(nextPhase, nextCode);
+      if (cacheDegraded) app.notify?.("WORKING_STATE_CACHE_DEGRADED");
+      return Object.freeze({
+        ok: true,
+        code: nextCode,
+        version: remoteVersion,
+        stateSha256,
+        cacheDegraded,
+        cacheCode,
+      });
     }
 
     async function parseReadResult(result) {
@@ -535,7 +569,15 @@
   }
 
   function createDisabledBrowserRuntime() {
-    const status = Object.freeze({ configured: false, phase: "local-only", code: "", message: "", canMutate: true });
+    const status = Object.freeze({
+      configured: false,
+      phase: "local-only",
+      code: "",
+      message: "",
+      canMutate: true,
+      cacheDegraded: false,
+      cacheCode: "",
+    });
     return Object.freeze({
       status: () => status,
       requiresGateway: () => false,
