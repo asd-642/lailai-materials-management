@@ -544,12 +544,19 @@
       return publicStatus();
     }
 
+    function denyMutation(nextCode = "WORKING_STATE_AUTH_REQUIRED") {
+      activeDraft = null;
+      setStatus(confirmedPayload ? "offline-read-only" : "idle", nextCode);
+      return publicStatus();
+    }
+
     return Object.freeze({
       hydrate,
       runSharedMutation,
       reloadLatest,
       reapplyPendingDraft,
       deactivate,
+      denyMutation,
       status: publicStatus,
       allowsImport: () => false,
       activeDraft: () => activeDraft,
@@ -630,14 +637,34 @@
       return Object.freeze({ ...coordinator.status(), configured: true });
     }
 
-    async function hydrateIfAuthorized(status = authRuntime.status?.()) {
+    async function hydrateIfAuthorized() {
+      const status = authRuntime.status?.();
       if (!status?.signedIn || !status?.ownerVerified) {
         coordinator.deactivate(status?.signedIn ? "WORKING_STATE_OWNER_REQUIRED" : "WORKING_STATE_AUTH_REQUIRED");
         return runtimeStatus();
       }
+      if (coordinator.status().phase === "ready") return runtimeStatus();
       if (hydratePromise) return hydratePromise;
       hydratePromise = coordinator.hydrate().finally(() => { hydratePromise = null; });
       return hydratePromise;
+    }
+
+    function canonicalMutationAuthorization() {
+      let status = null;
+      try { status = authRuntime.status?.() || null; } catch (error) { status = null; }
+      if (status?.signedIn && status?.ownerVerified) return Object.freeze({ ok: true, code: "" });
+      const denied = status?.signedIn ? "WORKING_STATE_OWNER_REQUIRED" : "WORKING_STATE_AUTH_REQUIRED";
+      coordinator.denyMutation(denied);
+      return resultError(denied);
+    }
+
+    function runAuthorizedCoordinatorMutation(invoke, denialResultCode = "") {
+      const authorization = canonicalMutationAuthorization();
+      if (!authorization.ok) {
+        applicationProxy.notify(authorization.code);
+        return Promise.resolve(resultError(denialResultCode || authorization.code));
+      }
+      return invoke();
     }
 
     function createBugStorage() {
@@ -708,7 +735,10 @@
         effects.push({ type: String(type || ""), args: clone(args) });
         return true;
       },
-      runSharedMutation: (mutator, options) => coordinator.runSharedMutation(mutator, options),
+      runSharedMutation: (mutator, options) => runAuthorizedCoordinatorMutation(
+        () => coordinator.runSharedMutation(mutator, options),
+        "WORKING_STATE_READ_ONLY",
+      ),
       installApplication(adapterValue) { installedApplication = adapterValue; return true; },
       installMutationHandlers(names) {
         const unique = [...new Set(Array.isArray(names) ? names : [])];
@@ -717,6 +747,14 @@
           if (typeof original !== "function" || original.__sharedWorkingStateGateway) return;
           const wrapped = function (...args) {
             if (coordinator.activeDraft()) return original.apply(this, args);
+            const authorization = canonicalMutationAuthorization();
+            if (!authorization.ok) {
+              if (name === "login" || name === "logout") return original.apply(this, args);
+              const event = args[0];
+              if (event && typeof event.preventDefault === "function") event.preventDefault();
+              applicationProxy.notify(authorization.code);
+              return Promise.resolve(authorization);
+            }
             if (!coordinator.status().canMutate) {
               if (name === "login" || name === "logout") return original.apply(this, args);
               const event = args[0];
@@ -732,15 +770,17 @@
         return true;
       },
       async initialize() {
-        browserRoot.addEventListener?.("materials-quote-supabase-auth-change", (event) => {
-          hydrateIfAuthorized(event?.detail).finally(() => installedApplication?.render?.());
+        browserRoot.addEventListener?.("materials-quote-supabase-auth-change", () => {
+          hydrateIfAuthorized().finally(() => installedApplication?.render?.());
         });
-        await hydrateIfAuthorized(authRuntime.status?.());
+        await hydrateIfAuthorized();
         return runtimeStatus();
       },
-      hydrate: () => hydrateIfAuthorized(authRuntime.status?.()),
+      hydrate: () => hydrateIfAuthorized(),
       reloadLatest: () => coordinator.reloadLatest(),
-      reapplyPendingDraft: () => coordinator.reapplyPendingDraft(),
+      reapplyPendingDraft: () => runAuthorizedCoordinatorMutation(
+        () => coordinator.reapplyPendingDraft(),
+      ),
       discardPendingDraft: () => coordinator.discardPendingDraft(),
       allowsImport: () => false,
       bugReportStorage: createBugStorage,
